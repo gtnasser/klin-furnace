@@ -1,0 +1,119 @@
+#include "FaultDetector.h"
+#include "Config.h"
+#include <math.h>
+
+// ------------------------------------------------------------
+// Construtor
+// ------------------------------------------------------------
+FaultDetector::FaultDetector()
+    : _activeFault(FaultCode::NONE),
+      _lastTemperature(0.0f),
+      _stuckTimer(0.0f),
+      _hasLastTemp(false) {
+}
+
+// ------------------------------------------------------------
+// Reset
+// ------------------------------------------------------------
+void FaultDetector::reset() {
+    _activeFault     = FaultCode::NONE;
+    _stuckTimer      = 0.0f;
+    _hasLastTemp     = false;
+    _lastTemperature = 0.0f;
+}
+
+// ------------------------------------------------------------
+// Avaliacao principal
+// ------------------------------------------------------------
+FaultCode FaultDetector::update(float temperature, float setpoint,
+                                float power, bool ssrOn, float dt) {
+
+    // 1. Validade da leitura (prioridade maxima)
+    FaultCode f = checkValidity(temperature);
+    if (f != FaultCode::NONE) {
+        _activeFault = f;
+        _hasLastTemp = false;   // leitura invalida: descarta referencia
+        return _activeFault;
+    }
+
+    // 2. Sobretemperatura
+    f = checkOverTemperature(temperature);
+    if (f != FaultCode::NONE) {
+        _activeFault = f;
+        _lastTemperature = temperature;
+        _hasLastTemp = true;
+        return _activeFault;
+    }
+
+    // 3. Sensor travado
+    f = checkSensorStuck(temperature, setpoint, power, ssrOn, dt);
+    if (f != FaultCode::NONE) {
+        _activeFault = f;
+        _lastTemperature = temperature;
+        _hasLastTemp = true;
+        return _activeFault;
+    }
+
+    // Nenhuma falha: atualiza referencia
+    _lastTemperature = temperature;
+    _hasLastTemp = true;
+    _activeFault = FaultCode::NONE;
+    return _activeFault;
+}
+
+// ------------------------------------------------------------
+// Leitura valida?
+// ------------------------------------------------------------
+FaultCode FaultDetector::checkValidity(float temperature) const {
+    if (isnan(temperature)) {
+        return FaultCode::THERMOCOUPLE_OPEN;
+    }
+    if (temperature < MIN_VALID_TEMP_C) {
+        return FaultCode::THERMOCOUPLE_OPEN;
+    }
+    return FaultCode::NONE;
+}
+
+// ------------------------------------------------------------
+// Sobretemperatura
+// ------------------------------------------------------------
+FaultCode FaultDetector::checkOverTemperature(float temperature) const {
+    if (temperature > SAFETY_LIMIT_C) {
+        return FaultCode::OVER_TEMPERATURE;
+    }
+    return FaultCode::NONE;
+}
+
+// ------------------------------------------------------------
+// Sensor travado
+// Tres condicoes simultaneas:
+//   heating      : SSR ligado e potencia acima do limiar
+//   flat         : variacao menor que a resolucao do sistema
+//   farFromTarget: erro em relacao ao setpoint acima da banda
+// ------------------------------------------------------------
+FaultCode FaultDetector::checkSensorStuck(float temperature, float setpoint,
+                                          float power, bool ssrOn, float dt) {
+
+    // Primeira leitura valida: nao ha referencia para comparar
+    if (!_hasLastTemp) {
+        _stuckTimer = 0.0f;
+        return FaultCode::NONE;
+    }
+
+    const bool heating      = ssrOn && (power > STUCK_POWER_THRESHOLD);
+    const float deltaT      = fabsf(temperature - _lastTemperature);
+    const bool flat         = (deltaT < STUCK_DELTA_THRESHOLD);
+    const float errorToSp   = fabsf(setpoint - temperature);
+    const bool farFromTarget = (errorToSp > STUCK_SETPOINT_BAND);
+
+    if (heating && flat && farFromTarget) {
+        _stuckTimer += dt;
+        if (_stuckTimer >= STUCK_WINDOW_S) {
+            return FaultCode::SENSOR_STUCK;
+        }
+    } else {
+        _stuckTimer = 0.0f;
+    }
+
+    return FaultCode::NONE;
+}

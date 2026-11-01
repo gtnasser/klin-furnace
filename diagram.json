@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "author": "Giba",
+  "editor": "wokwi",
+  "parts": [
+    {
+      "type": "board-esp32-devkit-c-v4",
+      "id": "esp",
+      "top": 0,
+      "left": 0,
+      "attrs": {}
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_run",
+      "top": -60,
+      "left": 120,
+      "attrs": { "color": "green", "label": "RUN" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_run",
+      "top": -20,
+      "left": 130,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_fault",
+      "top": -60,
+      "left": 200,
+      "attrs": { "color": "red", "label": "FAULT" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_fault",
+      "top": -20,
+      "left": 210,
+      "attrs": { "value": "220" }
+    },
+    {
+      "type": "wokwi-led",
+      "id": "led_ssr",
+      "top": -60,
+      "left": 280,
+      "attrs": { "color": "yellow", "label": "SSR" }
+    },
+    {
+      "type": "wokwi-resistor",
+      "id": "r_ssr",
+      "top": -20,
+      "left": 290,
+      "attrs": { "value": "220" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX",   "$serialMonitor:RX", "", [] ],
+    [ "esp:RX",   "$serialMonitor:TX", "", [] ],
+
+    [ "esp:2",  "r_run:1",   "green",  [] ],
+    [ "r_run:2", "led_run:A", "green",  [] ],
+    [ "led_run:C", "esp:GND.1", "black", [] ],
+
+    [ "esp:4",  "r_fault:1", "green",  [] ],
+    [ "r_fault:2", "led_fault:A", "green",  [] ],
+    [ "led_fault:C", "esp:GND.1", "black", [] ],
+
+    [ "esp:25", "r_ssr:1",   "green",  [] ],
+    [ "r_ssr:2", "led_ssr:A", "green",  [] ],
+    [ "led_ssr:C", "esp:GND.1", "black", [] ]
+  ]
+}
