@@ -5,10 +5,10 @@
 // Construtor
 // ------------------------------------------------------------
 SSRDriver::SSRDriver()
-    : _pin(0),
+    : _pin(PIN_UNASSIGNED),
       _power(0.0f),
       _isOn(false),
-      _forcedOff(true),        // comeca travado ate begin()
+      _forcedOff(true),
       _windowElapsedMs(0) {
 }
 
@@ -17,32 +17,39 @@ SSRDriver::SSRDriver()
 // ------------------------------------------------------------
 void SSRDriver::begin(uint8_t pin) {
     _pin = pin;
+
+    if (_pin == PIN_UNASSIGNED) {
+        _isOn = false;
+        _forcedOff = true;
+        return;
+    }
+
     pinMode(_pin, OUTPUT);
     setOutput(false);
 
-    _power            = 0.0f;
-    _isOn             = false;
-    _forcedOff        = false;   // libera apos configurar o pino
-    _windowElapsedMs  = 0;
+    _power = 0.0f;
+    _isOn = false;
+    _forcedOff = false;
+    _windowElapsedMs = 0;
 }
 
 // ------------------------------------------------------------
-// Atualizacao da modulacao
+// Modulacao por time-proportioning
 // ------------------------------------------------------------
-void SSRDriver::update(float power, uint32_t dtMs) {
+void SSRDriver::update(float powerPct, uint32_t dtRealMs) {
 
-    // Travado por emergencia: garante OFF e ignora comandos
-    if (_forcedOff) {
+    // Sem pino ou travado: saida permanece desligada
+    if (_pin == PIN_UNASSIGNED || _forcedOff) {
         setOutput(false);
         return;
     }
 
-    // Sanitiza a potencia
-    if (power < 0.0f)   power = 0.0f;
-    if (power > 100.0f) power = 100.0f;
-    _power = power;
+    // Satura a potencia na faixa valida
+    if (powerPct < 0.0f)   powerPct = 0.0f;
+    if (powerPct > 100.0f) powerPct = 100.0f;
+    _power = powerPct;
 
-    // Potencia zero: desliga e reinicia a janela
+    // Potencia nula: desliga e reinicia a janela
     if (_power <= 0.0f) {
         setOutput(false);
         _windowElapsedMs = 0;
@@ -57,28 +64,30 @@ void SSRDriver::update(float power, uint32_t dtMs) {
     }
 
     // Avanca a janela
-    _windowElapsedMs += dtMs;
+    _windowElapsedMs += dtRealMs;
     if (_windowElapsedMs >= SSR_WINDOW_MS) {
-        _windowElapsedMs %= SSR_WINDOW_MS;
+        _windowElapsedMs -= SSR_WINDOW_MS;
     }
 
-    // Tempo ligado proporcional a potencia
-    uint32_t onTimeMs = (uint32_t)((SSR_WINDOW_MS * _power) / 100.0f);
+    // Tempo ligado dentro da janela
+    const uint32_t onTimeMs =
+        (uint32_t)((SSR_WINDOW_MS * _power) / 100.0f);
 
-    // Pulsos muito curtos nao acionam o SSR de forma confiavel
-    if (onTimeMs > 0 && onTimeMs < SSR_MIN_ON_MS) {
-        onTimeMs = SSR_MIN_ON_MS;
+    // Pulsos muito curtos sao descartados (confiabilidade do SSR)
+    if (onTimeMs < SSR_MIN_ON_MS) {
+        setOutput(false);
+        return;
     }
 
     setOutput(_windowElapsedMs < onTimeMs);
 }
 
 // ------------------------------------------------------------
-// Desligamento forcado (emergencia)
+// Desligamento forcado
 // ------------------------------------------------------------
 void SSRDriver::forceOff() {
     _forcedOff = true;
-    _power     = 0.0f;
+    _power = 0.0f;
     _windowElapsedMs = 0;
     setOutput(false);
 }
@@ -87,17 +96,21 @@ void SSRDriver::forceOff() {
 // Libera o travamento
 // ------------------------------------------------------------
 void SSRDriver::reset() {
-    _forcedOff       = false;
-    _power           = 0.0f;
-    _isOn            = false;
+    _forcedOff = false;
+    _power = 0.0f;
     _windowElapsedMs = 0;
     setOutput(false);
 }
 
 // ------------------------------------------------------------
-// Escrita no pino
+// Escrita no pino (com guarda)
 // ------------------------------------------------------------
 void SSRDriver::setOutput(bool on) {
     _isOn = on;
+
+    if (_pin == PIN_UNASSIGNED) {
+        return;   // sem pino: nao escreve em GPIO nenhum
+    }
+
     digitalWrite(_pin, on ? HIGH : LOW);
 }

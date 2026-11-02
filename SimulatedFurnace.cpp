@@ -3,105 +3,97 @@
 
 // ------------------------------------------------------------
 // Parametros do modelo termico
+// Ajustados para que o perfil de teste (10 min ate 300 degC)
+// atinja o alvo com potencia razoavel.
 // ------------------------------------------------------------
-// Ganho de aquecimento: degC/s com 100% de potencia.
-// Escolhido para que o forno atinja ~900 degC em ~30 min
-// de tempo simulado com potencia plena.
-#define SIM_AMBIENT_C        25.0f
-#define SIM_HEAT_GAIN        0.55f    // degC/s a 100%
-#define SIM_LOSS_COEF        0.00035f // perda proporcional ao erro
-#define SIM_MAX_TEMP_C       1300.0f  // teto de seguranca do modelo
+#define SIM_K_HEAT   0.35f    // degC/s a 100% de potencia
+#define SIM_K_LOSS   0.0025f  // 1/s
+#define SIM_T_AMB    25.0f    // degC
 
 // ------------------------------------------------------------
 // Construtor
 // ------------------------------------------------------------
 SimulatedFurnace::SimulatedFurnace()
-    : _temperature(SIM_AMBIENT_C),
+    : _temperature(SIM_T_AMB),
       _power(0.0f),
-      _injectActive(false),
-      _injectedTemp(0.0f) {
+      _injectionActive(false),
+      _injectedTemperature(0.0f) {
 }
 
 // ------------------------------------------------------------
 // Inicializacao
 // ------------------------------------------------------------
 void SimulatedFurnace::begin() {
-    _temperature  = SIM_AMBIENT_C;
-    _power        = 0.0f;
-    _injectActive = false;
-    _injectedTemp = 0.0f;
-}
-
-// ------------------------------------------------------------
-// Leitura de temperatura
-// ------------------------------------------------------------
-float SimulatedFurnace::getTemperature() {
-    if (_injectActive) {
-        return _injectedTemp;
-    }
-    return _temperature;
-}
-
-// ------------------------------------------------------------
-// Aplicacao de potencia
-// ------------------------------------------------------------
-void SimulatedFurnace::setPower(float power, float dt) {
-    if (power < 0.0f)   power = 0.0f;
-    if (power > 100.0f) power = 100.0f;
-    _power = power;
-
-    if (dt <= 0.0f) {
-        return;
-    }
-
-    // Termo de aquecimento (proporcional a potencia)
-    const float heat = (_power / 100.0f) * SIM_HEAT_GAIN;
-
-    // Termo de perda (proporcional a diferenca para o ambiente)
-    const float loss = (_temperature - SIM_AMBIENT_C) * SIM_LOSS_COEF;
-
-    // Integracao de Euler
-    _temperature += (heat - loss) * dt;
-
-    // Teto do modelo
-    if (_temperature > SIM_MAX_TEMP_C) {
-        _temperature = SIM_MAX_TEMP_C;
-    }
-    // Piso: nunca abaixo do ambiente
-    if (_temperature < SIM_AMBIENT_C) {
-        _temperature = SIM_AMBIENT_C;
-    }
-}
-
-// ------------------------------------------------------------
-// Desligamento
-// ------------------------------------------------------------
-void SimulatedFurnace::shutdown() {
-    _power = 0.0f;
-    // Nao zera a temperatura: o forno fisico tambem nao esfria
-    // instantaneamente. O resfriamento natural continua no
-    // proximo setPower().
+    reset();
 }
 
 // ------------------------------------------------------------
 // Reset
 // ------------------------------------------------------------
 void SimulatedFurnace::reset() {
-    _temperature  = SIM_AMBIENT_C;
-    _power        = 0.0f;
-    _injectActive = false;
-    _injectedTemp = 0.0f;
+    _temperature = SIM_T_AMB;
+    _power = 0.0f;
+    _injectionActive = false;
+    _injectedTemperature = 0.0f;
 }
 
 // ------------------------------------------------------------
-// Injecao de temperatura (teste de SENSOR_STUCK)
+// Aplicacao de potencia
 // ------------------------------------------------------------
-void SimulatedFurnace::injectTemperature(float tempC) {
-    _injectActive = true;
-    _injectedTemp = tempC;
+void SimulatedFurnace::setPower(float powerPct, float dtSim) {
+
+    // Satura a potencia
+    if (powerPct < 0.0f)   powerPct = 0.0f;
+    if (powerPct > 100.0f) powerPct = 100.0f;
+    _power = powerPct;
+
+    // dt invalido: nao integra
+    if (dtSim <= 0.0f) {
+        return;
+    }
+
+    // Injecao ativa: temperatura fixa, modelo nao evolui
+    if (_injectionActive) {
+        _temperature = _injectedTemperature;
+        return;
+    }
+
+    // Modelo de primeira ordem
+    const float heatIn  = (_power / 100.0f) * SIM_K_HEAT;
+    const float heatOut = (_temperature - SIM_T_AMB) * SIM_K_LOSS;
+    const float dT      = (heatIn - heatOut) * dtSim;
+
+    _temperature += dT;
+
+    // Piso: nao desce abaixo do ambiente
+    if (_temperature < SIM_T_AMB) {
+        _temperature = SIM_T_AMB;
+    }
 }
 
-void SimulatedFurnace::clearFaultInjection() {
-    _injectActive = false;
-    _injectedTemp = 0.0f;
+// ------------------------------------------------------------
+// Leitura de temperatura
+// ------------------------------------------------------------
+float SimulatedFurnace::getTemperature() {
+    return _temperature;
+}
+
+// ------------------------------------------------------------
+// Injecao (teste)
+// ------------------------------------------------------------
+void SimulatedFurnace::injectTemperature(float temperature) {
+    _injectionActive = true;
+    _injectedTemperature = temperature;
+    _temperature = temperature;
+}
+
+void SimulatedFurnace::clearInjection() {
+    _injectionActive = false;
+}
+
+// ------------------------------------------------------------
+// Temperatura ambiente
+// ------------------------------------------------------------
+float SimulatedFurnace::ambientTemperature() const {
+    return SIM_T_AMB;
 }

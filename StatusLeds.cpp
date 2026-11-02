@@ -10,8 +10,8 @@
 // Construtor
 // ------------------------------------------------------------
 StatusLeds::StatusLeds()
-    : _runPin(0),
-      _faultPin(0),
+    : _runPin(PIN_UNASSIGNED),
+      _faultPin(PIN_UNASSIGNED),
       _runOn(false),
       _faultOn(false),
       _blinkTimerMs(0),
@@ -25,14 +25,20 @@ void StatusLeds::begin(uint8_t runPin, uint8_t faultPin) {
     _runPin   = runPin;
     _faultPin = faultPin;
 
-    pinMode(_runPin, OUTPUT);
-    pinMode(_faultPin, OUTPUT);
+    if (_runPin != PIN_UNASSIGNED) {
+        pinMode(_runPin, OUTPUT);
+    }
+    if (_faultPin != PIN_UNASSIGNED) {
+        pinMode(_faultPin, OUTPUT);
+    }
+
+    _runOn        = false;
+    _faultOn      = false;
+    _blinkTimerMs = 0;
+    _blinkPhase   = false;
 
     setRun(false);
     setFault(false);
-
-    _blinkTimerMs = 0;
-    _blinkPhase   = false;
 }
 
 // ------------------------------------------------------------
@@ -48,7 +54,6 @@ void StatusLeds::update(KilnState state, FaultCode fault, uint32_t dtMs) {
     }
 
     // --- LED de falha ---
-    // Pisca quando ha falha ativa; apagado caso contrario.
     if (fault != FaultCode::NONE) {
         setFault(_blinkPhase);
     } else {
@@ -58,32 +63,26 @@ void StatusLeds::update(KilnState state, FaultCode fault, uint32_t dtMs) {
     // --- LED de run ---
     switch (state) {
         case KilnState::IDLE:
-            // Apagado: aguardando comando
             setRun(false);
             break;
 
         case KilnState::STARTING:
-            // Pisca rapido: preparando
             setRun(_blinkPhase);
             break;
 
         case KilnState::RUNNING:
-            // Aceso continuo: operando
             setRun(true);
             break;
 
         case KilnState::FINISHED:
-            // Aceso continuo: perfil concluido, forno ainda quente
             setRun(true);
             break;
 
         case KilnState::RESETTING:
-            // Pisca: retornando ao estado seguro
             setRun(_blinkPhase);
             break;
 
         case KilnState::EMERGENCY:
-            // Apagado: forno em falha critica
             setRun(false);
             break;
 
@@ -102,9 +101,13 @@ void StatusLeds::allOff() {
 }
 
 // ------------------------------------------------------------
-// Escrita nos pinos (com cache para evitar digitalWrite repetido)
+// Escrita nos pinos (com guarda e cache)
 // ------------------------------------------------------------
 void StatusLeds::setRun(bool on) {
+    if (_runPin == PIN_UNASSIGNED) {
+        _runOn = false;
+        return;
+    }
     if (_runOn == on) {
         return;
     }
@@ -113,6 +116,10 @@ void StatusLeds::setRun(bool on) {
 }
 
 void StatusLeds::setFault(bool on) {
+    if (_faultPin == PIN_UNASSIGNED) {
+        _faultOn = false;
+        return;
+    }
     if (_faultOn == on) {
         return;
     }

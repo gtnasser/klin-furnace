@@ -2,6 +2,30 @@
 #include "Config.h"
 
 // ------------------------------------------------------------
+// Validacao do mapa de pinos
+// ------------------------------------------------------------
+static bool validatePins(const HardwarePins& p) {
+    const uint8_t required[] = { p.ssr, p.ledRun, p.ledFault };
+
+    for (uint8_t i = 0; i < 3; i++) {
+        if (required[i] == PIN_UNASSIGNED) {
+            return false;
+        }
+        // GPIO valido no ESP32: 0 a 39
+        if (required[i] > 39) {
+            return false;
+        }
+    }
+
+    // Duplicidade entre pinos obrigatorios
+    if (p.ssr == p.ledRun || p.ssr == p.ledFault || p.ledRun == p.ledFault) {
+        return false;
+    }
+
+    return true;
+}
+
+// ------------------------------------------------------------
 // Construtor
 // ------------------------------------------------------------
 KilnController::KilnController(IFurnace* furnace,
@@ -16,7 +40,7 @@ KilnController::KilnController(IFurnace* furnace,
       _detector(detector),
       _telemetry(telemetry),
       _leds(leds),
-      _state(KilnState::IDLE),
+      _state(KilnState::EMERGENCY),   // seguro ate begin() validar
       _fault(FaultCode::NONE),
       _alarm(AlarmState::NO_ALARM),
       _temperature(0.0f),
@@ -32,12 +56,23 @@ KilnController::KilnController(IFurnace* furnace,
 // ------------------------------------------------------------
 // Inicializacao
 // ------------------------------------------------------------
-void KilnController::begin() {
+bool KilnController::begin(const HardwarePins& pins) {
+
+    if (!validatePins(pins)) {
+        // Estado seguro: nao inicializa hardware, permanece em EMERGENCY
+        _state  = KilnState::EMERGENCY;
+        _fault  = FaultCode::NONE;
+        _alarm  = AlarmState::NO_ALARM;
+        _power  = 0.0f;
+        _ssrOn  = false;
+        return false;
+    }
+
     _furnace->begin();
-    _ssr->begin(SSR_PIN);
+    _ssr->begin(pins.ssr);
     _pid->begin(PID_KP, PID_KI, PID_KD);
     _detector->reset();
-    _leds->begin(LED_RUN_PIN, LED_FAULT_PIN);
+    _leds->begin(pins.ledRun, pins.ledFault);
 
     _state             = KilnState::IDLE;
     _fault             = FaultCode::NONE;
@@ -48,10 +83,11 @@ void KilnController::begin() {
     _ssrOn             = false;
     _elapsedSimS       = 0.0f;
     _tsSimMs           = 0;
-    _lastTelemetryTsMs = 0; 
+    _lastTelemetryTsMs = 0;
     _lastSegment       = -1;
 
     _telemetry->emitEvent(_tsSimMs, "BOOT", _state, _fault);
+    return true;
 }
 
 // ------------------------------------------------------------
@@ -78,11 +114,11 @@ void KilnController::update(uint32_t dtRealMs) {
         case KilnState::EMERGENCY: handleEmergency(dtSim); break;
     }
 
-    // Atualiza atuador (tempo REAL: SSR opera em tempo real)
+    // Atuador: tempo REAL (SSR opera em tempo real)
     _ssr->update(_power, dtRealMs);
     _ssrOn = _ssr->isOn();
 
-    // Atualiza sinalizacao (tempo REAL)
+    // Sinalizacao: tempo REAL
     _leds->update(_state, _fault, dtRealMs);
 
     // Telemetria periodica
@@ -106,7 +142,7 @@ void KilnController::enterState(KilnState newState) {
 ProfileStatus KilnController::start(const float (*points)[2], uint8_t count) {
 
     if (_state != KilnState::IDLE) {
-        return ProfileStatus::OK;  // ja rodando; ignora silenciosamente
+        return ProfileStatus::NOT_IDLE;
     }
 
     if (!_profile.load(points, count)) {
@@ -138,12 +174,12 @@ bool KilnController::requestReset() {
         return false;
     }
     if (_temperature > RESET_ALLOWED_C) {
-        return false;  // forno ainda quente
+        return false;   // forno ainda quente
     }
 
     _pid->reset();
     _detector->reset();
-    _ssr->reset();          // libera o travamento do SSR
+    _ssr->reset();       // libera o travamento do SSR
     _fault = FaultCode::NONE;
     _alarm = AlarmState::NO_ALARM;
     _power = 0.0f;
@@ -153,7 +189,6 @@ bool KilnController::requestReset() {
     enterState(KilnState::RESETTING);
     return true;
 }
-
 
 // ------------------------------------------------------------
 // IDLE: aguardando inicio
@@ -171,7 +206,7 @@ void KilnController::handleStarting(float dtSim) {
     _power = 0.0f;
     _furnace->setPower(0.0f, dtSim);
 
-    // Verifica se a leitura inicial e valida
+    // Leitura inicial invalida?
     if (isnan(_temperature) || _temperature < MIN_VALID_TEMP_C) {
         _fault = FaultCode::THERMOCOUPLE_OPEN;
         _alarm = AlarmState::ACTIVE_UNACK;
@@ -207,7 +242,7 @@ void KilnController::handleRunning(float dtSim) {
         _telemetry->emitEvent(_tsSimMs, "SEGMENT", _state, _fault);
     }
 
-    // PID
+    // PID (tempo SIMULADO)
     _power = _pid->update(_setpoint, _temperature, dtSim);
 
     // Aplica potencia ao forno (tempo SIMULADO)
@@ -292,12 +327,10 @@ void KilnController::emitPeriodicTelemetry() {
 
     const uint32_t periodMs = (uint32_t)(g_telemetryPeriodS * 1000.0f);
 
-    // Periodo invalido: nao emite
     if (periodMs == 0) {
         return;
     }
 
-    // Ainda nao passou o periodo
     if ((_tsSimMs - _lastTelemetryTsMs) < periodMs) {
         return;
     }

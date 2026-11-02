@@ -5,34 +5,42 @@
 #include "IFurnace.h"
 
 // ============================================================
-// SimulatedFurnace - Modelo termico simplificado
-// V1: usado no Wokwi. Nao depende de hardware.
+// SimulatedFurnace - Modelo termico de primeira ordem
 //
-// Modelo: primeira ordem com perda para o ambiente.
-//   dT/dt = (P * K_GAIN) - ((T - T_AMB) * K_LOSS)
+// dT/dt = (P * K_HEAT) - ((T - T_AMB) * K_LOSS)
+//
+// Onde:
+//   P       : potencia media (0-100)
+//   K_HEAT  : ganho de aquecimento (degC/s a 100%)
+//   K_LOSS  : coeficiente de perda (1/s)
+//   T_AMB   : temperatura ambiente
+//
+// Tempo em SIMULADO: dtSim vem do KilnController.
+// O modelo nao tem inercia propria: a inercia emerge da
+// constante de tempo 1/K_LOSS.
 // ============================================================
 
 class SimulatedFurnace : public IFurnace {
 public:
     SimulatedFurnace();
 
-    void  begin() override;
+    void begin() override;
+    void setPower(float powerPct, float dtSim) override;
     float getTemperature() override;
-    void  setPower(float power, float dt) override;
-    void  shutdown() override;
-    void  reset() override;
+    void reset() override;
 
-    // Injeta uma temperatura fixa (para testar SENSOR_STUCK).
-    // Chamar clearFaultInjection() para voltar ao modelo normal.
-    void injectTemperature(float tempC);
-    void clearFaultInjection();
-    bool isInjectionActive() const { return _injectActive; }
+    // Injecao de temperatura (apenas para teste).
+    // Usado para simular sensor travado ou leitura invalida.
+    void injectTemperature(float temperature);
+    void clearInjection();
 
 private:
-    float _temperature;      // degC
-    float _power;            // 0-100
-    bool  _injectActive;
-    float _injectedTemp;
+    float _temperature;
+    float _power;
+    bool  _injectionActive;
+    float _injectedTemperature;
+
+    float ambientTemperature() const;
 };
 
 #endif // SIMULATED_FURNACE_H

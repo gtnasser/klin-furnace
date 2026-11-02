@@ -6,41 +6,43 @@
 
 // ============================================================
 // FaultDetector - Deteccao de falhas do forno
-// V1: THERMOCOUPLE_OPEN, SENSOR_STUCK, OVER_TEMPERATURE
-// Stubs (nao gerados no V1): SSR_STUCK_ON, HEATING_FAILURE
+//
+// Falhas ativas no V1:
+//   THERMOCOUPLE_OPEN : leitura fora da faixa fisica
+//   SENSOR_STUCK      : aquecendo, plano e longe do alvo
+//   OVER_TEMPERATURE  : acima do limite de seguranca
+//
+// Reservadas para o V2 (declaradas, nao geradas):
+//   SSR_STUCK_ON      : requer realimentacao do SSR
+//   HEATING_FAILURE   : requer leitura real de temperatura
+//
+// Tempo em SIMULADO: dtSim vem do KilnController.
 // ============================================================
 
 class FaultDetector {
 public:
     FaultDetector();
 
-    // Avalia as condicoes atuais e retorna a falha detectada.
-    // temperature : temperatura atual em degC
-    // setpoint    : setpoint atual em degC
-    // power       : potencia calculada pelo PID (0-100%)
-    // ssrOn       : estado binario do SSR neste instante
-    // dt          : delta de tempo SIMULADO em segundos
-    FaultCode update(float temperature, float setpoint,
-                     float power, bool ssrOn, float dt);
-
-    // Limpa o estado interno (timers, ultima temperatura).
-    // Chamado ao entrar em RESETTING.
+    // Zera todo o estado interno. Chamar no inicio de cada perfil.
     void reset();
 
-    // Falha atualmente ativa (persistente ate reset()).
-    FaultCode getActiveFault() const { return _activeFault; }
+    // Avalia as condicoes e retorna a falha ativa (NONE se ok).
+    // temperature : leitura atual em degC
+    // setpoint    : setpoint atual em degC
+    // power       : potencia aplicada (0-100)
+    // ssrOn       : estado binario do SSR (nao usado no V1)
+    // dtSim       : delta de tempo SIMULADO em segundos
+    FaultCode update(float temperature, float setpoint,
+                     float power, bool ssrOn, float dtSim);
 
 private:
-    FaultCode _activeFault;
-    float     _lastTemperature;
-    float     _stuckTimer;      // segundos acumulados em suspeita
-    bool      _hasLastTemp;     // false ate a primeira leitura valida
+    float _stuckTimerS;
+    float _lastTemperature;
 
-    // Avalia cada condicao isoladamente
-    FaultCode checkValidity(float temperature) const;
-    FaultCode checkOverTemperature(float temperature) const;
-    FaultCode checkSensorStuck(float temperature, float setpoint,
-                               float power, bool ssrOn, float dt);
+    bool isReadingInvalid(float temperature) const;
+    bool isOverTemperature(float temperature) const;
+    bool isSensorStuck(float temperature, float setpoint,
+                       float power, float dtSim);
 };
 
 #endif // FAULT_DETECTOR_H

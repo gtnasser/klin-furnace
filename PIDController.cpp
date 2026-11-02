@@ -5,15 +5,17 @@
 // Construtor
 // ------------------------------------------------------------
 PIDController::PIDController()
-    : _kp(0.0f), _ki(0.0f), _kd(0.0f),
+    : _kp(0.0f),
+      _ki(0.0f),
+      _kd(0.0f),
       _integral(0.0f),
-      _lastMeasured(0.0f),
-      _output(0.0f),
-      _hasLastMeasured(false) {
+      _lastMeasurement(0.0f),
+      _lastOutput(0.0f),
+      _firstRun(true) {
 }
 
 // ------------------------------------------------------------
-// Configuracao dos ganhos
+// Inicializacao
 // ------------------------------------------------------------
 void PIDController::begin(float kp, float ki, float kd) {
     _kp = kp;
@@ -27,13 +29,13 @@ void PIDController::begin(float kp, float ki, float kd) {
 // ------------------------------------------------------------
 void PIDController::reset() {
     _integral        = 0.0f;
-    _lastMeasured    = 0.0f;
-    _output          = 0.0f;
-    _hasLastMeasured = false;
+    _lastMeasurement = 0.0f;
+    _lastOutput      = 0.0f;
+    _firstRun        = true;
 }
 
 // ------------------------------------------------------------
-// Reset apenas do integral
+// Reset do integral (troca de segmento)
 // ------------------------------------------------------------
 void PIDController::resetIntegral() {
     _integral = 0.0f;
@@ -42,57 +44,56 @@ void PIDController::resetIntegral() {
 // ------------------------------------------------------------
 // Calculo do PID
 // ------------------------------------------------------------
-float PIDController::update(float setpoint, float measured, float dt) {
+float PIDController::update(float setpoint, float measurement, float dtSim) {
 
-    // dt invalido: nao calcula, mantem a ultima saida
-    if (dt <= 0.0f) {
-        return _output;
+    // dt invalido: retorna a ultima saida sem alterar estado
+    if (dtSim <= 0.0f) {
+        return _lastOutput;
     }
 
-    const float error = setpoint - measured;
+    const float error = setpoint - measurement;
 
-    // --- Termo proporcional ---
+    // --- Proporcional ---
     const float pTerm = _kp * error;
 
-    // --- Termo integral (com anti-windup por clamping) ---
-    _integral += _ki * error * dt;
-    _integral = clamp(_integral, PID_INTEGRAL_MIN, PID_INTEGRAL_MAX);
-
-    // --- Termo derivativo ---
-    // Derivada sobre a medicao (nao sobre o erro) para evitar
-    // "derivative kick" quando o setpoint muda de segmento.
+    // --- Derivada sobre a MEDICAO ---
+    // Evita derivative kick quando o setpoint muda de segmento.
     float dTerm = 0.0f;
-    if (_hasLastMeasured) {
-        const float dMeasured = (measured - _lastMeasured) / dt;
-        dTerm = -_kd * dMeasured;
+    if (_firstRun) {
+        _lastMeasurement = measurement;
+        _firstRun = false;
+    } else {
+        const float dMeas = (measurement - _lastMeasurement) / dtSim;
+        dTerm = -_kd * dMeas;
+        _lastMeasurement = measurement;
+    }
+
+    // --- Integral com anti-windup condicional ---
+    // Nao integra se a saida ja esta saturada na mesma direcao do erro.
+    const bool saturatedHigh = (_lastOutput >= PID_OUTPUT_MAX);
+    const bool saturatedLow  = (_lastOutput <= PID_OUTPUT_MIN);
+
+    const bool blockIntegral =
+        (saturatedHigh && error > 0.0f) ||
+        (saturatedLow  && error < 0.0f);
+
+    if (!blockIntegral) {
+        _integral += _ki * error * dtSim;
+        _integral = clamp(_integral, PID_INTEGRAL_MIN, PID_INTEGRAL_MAX);
     }
 
     // --- Saida ---
-    float out = pTerm + _integral + dTerm;
-    out = clamp(out, PID_OUTPUT_MIN, PID_OUTPUT_MAX);
+    const float output = pTerm + _integral + dTerm;
+    _lastOutput = clamp(output, PID_OUTPUT_MIN, PID_OUTPUT_MAX);
 
-    // Anti-windup condicional: se a saida saturou, desfaz o
-    // incremento integral que empurrou para fora do limite.
-    if (out >= PID_OUTPUT_MAX && error > 0.0f) {
-        _integral -= _ki * error * dt;
-        _integral = clamp(_integral, PID_INTEGRAL_MIN, PID_INTEGRAL_MAX);
-    } else if (out <= PID_OUTPUT_MIN && error < 0.0f) {
-        _integral -= _ki * error * dt;
-        _integral = clamp(_integral, PID_INTEGRAL_MIN, PID_INTEGRAL_MAX);
-    }
-
-    _lastMeasured    = measured;
-    _hasLastMeasured = true;
-    _output          = out;
-
-    return _output;
+    return _lastOutput;
 }
 
 // ------------------------------------------------------------
-// Utilitario
+// Saturação
 // ------------------------------------------------------------
-float PIDController::clamp(float value, float minVal, float maxVal) const {
-    if (value < minVal) return minVal;
-    if (value > maxVal) return maxVal;
+float PIDController::clamp(float value, float lo, float hi) const {
+    if (value < lo) return lo;
+    if (value > hi) return hi;
     return value;
 }

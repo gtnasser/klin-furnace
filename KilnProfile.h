@@ -6,40 +6,35 @@
 
 // ============================================================
 // KilnProfile - Perfil de queima por pontos (tempo, temperatura)
-// V1: aquecimento apenas (temperatura monotonicamente crescente)
+//
+// Contrato:
+//   - Pontos em (minutos, degC), ordenados por tempo crescente
+//   - Primeiro ponto DEVE ter t = 0
+//   - Tempos estritamente crescentes (sem duplicatas)
+//   - Temperaturas nao decrescentes
+//   - Maximo de MAX_PROFILE_POINTS pontos
+//   - getSegmentIndex() retorna int8_t: limite de 127 segmentos
 // ============================================================
+
+#define MAX_PROFILE_POINTS  16
 
 class KilnProfile {
 public:
-    // Construtor vazio: perfil invalido ate load() ser chamado
     KilnProfile();
 
-    // Carrega os pontos. Copia os dados para uso interno.
-    // Retorna false se o ponteiro for nulo ou o tamanho invalido.
     bool load(const float (*points)[2], uint8_t count);
-
-    // Valida o perfil carregado.
     ProfileStatus validate() const;
 
-    // Setpoint para o tempo decorrido (em minutos).
-    // Antes de t=0: retorna o primeiro ponto.
-    // Depois do ultimo ponto: retorna o ultimo ponto (patamar).
-    float getSetpoint(float elapsedMin) const;
-
-    // Duracao total do perfil em minutos.
-    float getDurationMin() const;
-
-    // Indice do segmento atual (0-based). -1 se invalido.
+    float  getSetpoint(float elapsedMin) const;
     int8_t getSegmentIndex(float elapsedMin) const;
+    float  getDurationMin() const;
+    bool   isFinished(float elapsedMin) const;
 
-    // Numero de pontos carregados.
     uint8_t getPointCount() const { return _count; }
-
-    // Indica se o tempo decorrido ultrapassou a duracao total.
-    bool isFinished(float elapsedMin) const;
+    bool    isEmpty() const { return _count == 0; }
 
 private:
-    float   _points[16][2];  // copia interna, maximo 16 pontos
+    float   _points[MAX_PROFILE_POINTS][2];
     uint8_t _count;
 };
 

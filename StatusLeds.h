@@ -8,6 +8,12 @@
 // StatusLeds - Sinalizacao visual de estado e falha
 // V1: LED de run e LED de fault.
 // LED de ack e buzzer reservados para versoes futuras.
+//
+// Opera em TEMPO REAL: LEDs sao sinalizacao para humano.
+//
+// Guarda de seguranca: pinos em PIN_UNASSIGNED nao recebem
+// escrita. Permite que o controlador rode em EMERGENCY sem
+// hardware inicializado.
 // ============================================================
 
 class StatusLeds {
@@ -15,6 +21,7 @@ public:
     StatusLeds();
 
     // Configura os pinos. Chamar uma vez no setup.
+    // Pinos em PIN_UNASSIGNED ficam inoperantes.
     void begin(uint8_t runPin, uint8_t faultPin);
 
     // Atualiza os LEDs. Chamar a cada ciclo do loop.
