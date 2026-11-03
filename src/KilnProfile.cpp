@@ -1,9 +1,15 @@
 #include "KilnProfile.h"
 #include "Config.h"
 
+// ------------------------------------------------------------
+// Construtor
+// ------------------------------------------------------------
 KilnProfile::KilnProfile() : _count(0) {
 }
 
+// ------------------------------------------------------------
+// Carrega os pontos
+// ------------------------------------------------------------
 bool KilnProfile::load(const float (*points)[2], uint8_t count) {
     if (points == nullptr || count == 0 || count > MAX_PROFILE_POINTS) {
         _count = 0;
@@ -18,6 +24,9 @@ bool KilnProfile::load(const float (*points)[2], uint8_t count) {
     return true;
 }
 
+// ------------------------------------------------------------
+// Validacao
+// ------------------------------------------------------------
 ProfileStatus KilnProfile::validate() const {
 
     if (_count < 2) {
@@ -59,6 +68,9 @@ ProfileStatus KilnProfile::validate() const {
     return ProfileStatus::OK;
 }
 
+// ------------------------------------------------------------
+// Setpoint por interpolacao linear
+// ------------------------------------------------------------
 float KilnProfile::getSetpoint(float elapsedMin) const {
 
     if (_count == 0) {
@@ -93,6 +105,10 @@ float KilnProfile::getSetpoint(float elapsedMin) const {
     return _points[_count - 1][1];
 }
 
+
+// ------------------------------------------------------------
+// Indice do segmento atual
+// ------------------------------------------------------------
 int8_t KilnProfile::getSegmentIndex(float elapsedMin) const {
 
     if (_count < 2) {
@@ -112,6 +128,9 @@ int8_t KilnProfile::getSegmentIndex(float elapsedMin) const {
     return (int8_t)(_count - 2);
 }
 
+// ------------------------------------------------------------
+// Duracao total
+// ------------------------------------------------------------
 float KilnProfile::getDurationMin() const {
     if (_count == 0) {
         return 0.0f;
@@ -119,6 +138,9 @@ float KilnProfile::getDurationMin() const {
     return _points[_count - 1][0];
 }
 
+// ------------------------------------------------------------
+// Perfil concluido?
+// ------------------------------------------------------------
 bool KilnProfile::isFinished(float elapsedMin) const {
     if (_count == 0) {
         return true;

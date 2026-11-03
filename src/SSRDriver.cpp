@@ -5,11 +5,11 @@
 // Construtor
 // ------------------------------------------------------------
 SSRDriver::SSRDriver()
-    : _pin(PIN_UNASSIGNED),
-      _power(0.0f),
-      _isOn(false),
-      _forcedOff(true),
-      _windowElapsedMs(0) {
+: _pin(PIN_UNASSIGNED),
+_power(0.0f),
+_isOn(false),
+_forcedOff(true),
+_windowElapsedMs(0) {
 }
 
 // ------------------------------------------------------------
@@ -55,20 +55,20 @@ void SSRDriver::update(float powerPct, uint32_t dtRealMs) {
         _windowElapsedMs = 0;
         return;
     }
-
+    
     // Potencia total: liga continuamente
     if (_power >= 100.0f) {
         setOutput(true);
         _windowElapsedMs = 0;
         return;
     }
-
+    
     // Avanca a janela
     _windowElapsedMs += dtRealMs;
     if (_windowElapsedMs >= SSR_WINDOW_MS) {
         _windowElapsedMs -= SSR_WINDOW_MS;
     }
-
+    
     // Tempo ligado dentro da janela
     const uint32_t onTimeMs =
         (uint32_t)((SSR_WINDOW_MS * _power) / 100.0f);
@@ -109,8 +109,9 @@ void SSRDriver::setOutput(bool on) {
     _isOn = on;
 
     if (_pin == PIN_UNASSIGNED) {
-        return;   // sem pino: nao escreve em GPIO nenhum
+        return;
     }
 
     digitalWrite(_pin, on ? HIGH : LOW);
 }
+

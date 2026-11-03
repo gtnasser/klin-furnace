@@ -6,11 +6,7 @@
 
 // ============================================================
 // StatusLeds - Sinalizacao visual de estado e falha
-// V1: LED de run e LED de fault.
-// LED de ack e buzzer reservados para versoes futuras.
-//
 // Opera em TEMPO REAL: LEDs sao sinalizacao para humano.
-//
 // Guarda de seguranca: pinos em PIN_UNASSIGNED nao recebem
 // escrita. Permite que o controlador rode em EMERGENCY sem
 // hardware inicializado.

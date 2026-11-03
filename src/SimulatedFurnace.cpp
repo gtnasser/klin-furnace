@@ -3,8 +3,6 @@
 
 // ------------------------------------------------------------
 // Parametros do modelo termico
-// Ajustados para que o perfil de teste (10 min ate 300 degC)
-// atinja o alvo com potencia razoavel.
 // ------------------------------------------------------------
 #define SIM_K_HEAT   0.35f    // degC/s a 100% de potencia
 #define SIM_K_LOSS   0.0025f  // 1/s
@@ -37,21 +35,22 @@ void SimulatedFurnace::reset() {
     _injectedTemperature = 0.0f;
 }
 
+
 // ------------------------------------------------------------
 // Aplicacao de potencia
 // ------------------------------------------------------------
 void SimulatedFurnace::setPower(float powerPct, float dtSim) {
-
+    
     // Satura a potencia
     if (powerPct < 0.0f)   powerPct = 0.0f;
     if (powerPct > 100.0f) powerPct = 100.0f;
     _power = powerPct;
-
+    
     // dt invalido: nao integra
     if (dtSim <= 0.0f) {
         return;
     }
-
+    
     // Injecao ativa: temperatura fixa, modelo nao evolui
     if (_injectionActive) {
         _temperature = _injectedTemperature;
@@ -78,15 +77,15 @@ float SimulatedFurnace::getTemperature() {
     return _temperature;
 }
 
-// ------------------------------------------------------------
-// Injecao (teste)
-// ------------------------------------------------------------
 void SimulatedFurnace::injectTemperature(float temperature) {
     _injectionActive = true;
     _injectedTemperature = temperature;
     _temperature = temperature;
 }
 
+// ------------------------------------------------------------
+// Injecao (teste)
+// ------------------------------------------------------------
 void SimulatedFurnace::clearInjection() {
     _injectionActive = false;
 }

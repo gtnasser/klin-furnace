@@ -11,13 +11,11 @@ static bool validatePins(const HardwarePins& p) {
         if (required[i] == PIN_UNASSIGNED) {
             return false;
         }
-        // GPIO valido no ESP32: 0 a 39
         if (required[i] > 39) {
             return false;
         }
     }
 
-    // Duplicidade entre pinos obrigatorios
     if (p.ssr == p.ledRun || p.ssr == p.ledFault || p.ledRun == p.ledFault) {
         return false;
     }
@@ -40,7 +38,7 @@ KilnController::KilnController(IFurnace* furnace,
       _detector(detector),
       _telemetry(telemetry),
       _leds(leds),
-      _state(KilnState::EMERGENCY),   // seguro ate begin() validar
+      _state(KilnState::EMERGENCY),
       _fault(FaultCode::NONE),
       _alarm(AlarmState::NO_ALARM),
       _temperature(0.0f),
@@ -59,7 +57,6 @@ KilnController::KilnController(IFurnace* furnace,
 bool KilnController::begin(const HardwarePins& pins) {
 
     if (!validatePins(pins)) {
-        // Estado seguro: nao inicializa hardware, permanece em EMERGENCY
         _state  = KilnState::EMERGENCY;
         _fault  = FaultCode::NONE;
         _alarm  = AlarmState::NO_ALARM;
@@ -95,16 +92,12 @@ bool KilnController::begin(const HardwarePins& pins) {
 // ------------------------------------------------------------
 void KilnController::update(uint32_t dtRealMs) {
 
-    // Converte para tempo simulado
     const float dtSim = (dtRealMs / 1000.0f) * g_timeScale;
 
-    // Avanca o relogio simulado
     _tsSimMs += (uint32_t)(dtSim * 1000.0f);
 
-    // Le a temperatura atual
     _temperature = _furnace->getTemperature();
 
-    // Despacha para o handler do estado
     switch (_state) {
         case KilnState::IDLE:      handleIdle(dtSim);      break;
         case KilnState::STARTING:  handleStarting(dtSim);  break;
@@ -114,14 +107,11 @@ void KilnController::update(uint32_t dtRealMs) {
         case KilnState::EMERGENCY: handleEmergency(dtSim); break;
     }
 
-    // Atuador: tempo REAL (SSR opera em tempo real)
     _ssr->update(_power, dtRealMs);
     _ssrOn = _ssr->isOn();
 
-    // Sinalizacao: tempo REAL
     _leds->update(_state, _fault, dtRealMs);
 
-    // Telemetria periodica
     emitPeriodicTelemetry();
 }
 
@@ -174,12 +164,12 @@ bool KilnController::requestReset() {
         return false;
     }
     if (_temperature > RESET_ALLOWED_C) {
-        return false;   // forno ainda quente
+        return false;
     }
 
     _pid->reset();
     _detector->reset();
-    _ssr->reset();       // libera o travamento do SSR
+    _ssr->reset();
     _fault = FaultCode::NONE;
     _alarm = AlarmState::NO_ALARM;
     _power = 0.0f;
@@ -191,7 +181,7 @@ bool KilnController::requestReset() {
 }
 
 // ------------------------------------------------------------
-// IDLE: aguardando inicio
+// Handlers de estado
 // ------------------------------------------------------------
 void KilnController::handleIdle(float dtSim) {
     _power = 0.0f;
@@ -199,14 +189,10 @@ void KilnController::handleIdle(float dtSim) {
     _furnace->setPower(0.0f, dtSim);
 }
 
-// ------------------------------------------------------------
-// STARTING: valida condicoes iniciais e parte para RUNNING
-// ------------------------------------------------------------
 void KilnController::handleStarting(float dtSim) {
     _power = 0.0f;
     _furnace->setPower(0.0f, dtSim);
 
-    // Leitura inicial invalida?
     if (isnan(_temperature) || _temperature < MIN_VALID_TEMP_C) {
         _fault = FaultCode::THERMOCOUPLE_OPEN;
         _alarm = AlarmState::ACTIVE_UNACK;
@@ -222,19 +208,13 @@ void KilnController::handleStarting(float dtSim) {
     enterState(KilnState::RUNNING);
 }
 
-// ------------------------------------------------------------
-// RUNNING: executa o perfil
-// ------------------------------------------------------------
 void KilnController::handleRunning(float dtSim) {
 
-    // Avanca o tempo do perfil
     _elapsedSimS += dtSim;
     const float elapsedMin = _elapsedSimS / 60.0f;
 
-    // Setpoint atual
     _setpoint = _profile.getSetpoint(elapsedMin);
 
-    // Mudanca de segmento: zera o integral para evitar arrasto
     const int8_t seg = _profile.getSegmentIndex(elapsedMin);
     if (seg != _lastSegment) {
         _pid->resetIntegral();
@@ -242,19 +222,15 @@ void KilnController::handleRunning(float dtSim) {
         _telemetry->emitEvent(_tsSimMs, "SEGMENT", _state, _fault);
     }
 
-    // PID (tempo SIMULADO)
     _power = _pid->update(_setpoint, _temperature, dtSim);
 
-    // Aplica potencia ao forno (tempo SIMULADO)
     _furnace->setPower(_power, dtSim);
 
-    // Avalia falhas
     evaluateFaults(dtSim);
     if (_state == KilnState::EMERGENCY) {
         return;
     }
 
-    // Fim do perfil?
     if (_profile.isFinished(elapsedMin)) {
         _power = 0.0f;
         _furnace->setPower(0.0f, dtSim);
@@ -262,27 +238,19 @@ void KilnController::handleRunning(float dtSim) {
     }
 }
 
-// ------------------------------------------------------------
-// FINISHED: perfil concluido, forno resfriando naturalmente
-// ------------------------------------------------------------
 void KilnController::handleFinished(float dtSim) {
     _power = 0.0f;
     _setpoint = _profile.getSetpoint(_profile.getDurationMin());
     _furnace->setPower(0.0f, dtSim);
 
-    // Continua avaliando sobretemperatura e leitura invalida
     evaluateFaults(dtSim);
 }
 
-// ------------------------------------------------------------
-// RESETTING: retorno ao estado seguro
-// ------------------------------------------------------------
 void KilnController::handleResetting(float dtSim) {
     _power = 0.0f;
     _setpoint = 0.0f;
     _furnace->setPower(0.0f, dtSim);
 
-    // Quando o forno esfriar o suficiente, volta para IDLE
     if (_temperature <= RESET_ALLOWED_C) {
         _furnace->reset();
         _temperature = _furnace->getTemperature();
@@ -290,14 +258,9 @@ void KilnController::handleResetting(float dtSim) {
     }
 }
 
-// ------------------------------------------------------------
-// EMERGENCY: SSR desligado, aguardando reset
-// ------------------------------------------------------------
 void KilnController::handleEmergency(float dtSim) {
     _power = 0.0f;
     _ssr->forceOff();
-
-    // Mantem o modelo termico evoluindo (resfriamento natural)
     _furnace->setPower(0.0f, dtSim);
 }
 
@@ -320,8 +283,6 @@ void KilnController::evaluateFaults(float dtSim) {
 
 // ------------------------------------------------------------
 // Telemetria periodica
-// Compara o relogio simulado com o ultimo envio: imune a
-// acumulacao de erro de ponto flutuante.
 // ------------------------------------------------------------
 void KilnController::emitPeriodicTelemetry() {
 

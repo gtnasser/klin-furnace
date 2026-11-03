@@ -4,7 +4,7 @@
 // ------------------------------------------------------------
 // Parametros de pisca
 // ------------------------------------------------------------
-#define BLINK_PERIOD_MS  500   // meio periodo do pisca
+#define BLINK_PERIOD_MS  500
 
 // ------------------------------------------------------------
 // Construtor
@@ -47,6 +47,7 @@ void StatusLeds::begin(uint8_t runPin, uint8_t faultPin) {
 void StatusLeds::update(KilnState state, FaultCode fault, uint32_t dtMs) {
 
     // Avanca o timer de pisca
+
     _blinkTimerMs += dtMs;
     if (_blinkTimerMs >= BLINK_PERIOD_MS) {
         _blinkTimerMs = 0;
@@ -62,33 +63,13 @@ void StatusLeds::update(KilnState state, FaultCode fault, uint32_t dtMs) {
 
     // --- LED de run ---
     switch (state) {
-        case KilnState::IDLE:
-            setRun(false);
-            break;
-
-        case KilnState::STARTING:
-            setRun(_blinkPhase);
-            break;
-
-        case KilnState::RUNNING:
-            setRun(true);
-            break;
-
-        case KilnState::FINISHED:
-            setRun(true);
-            break;
-
-        case KilnState::RESETTING:
-            setRun(_blinkPhase);
-            break;
-
-        case KilnState::EMERGENCY:
-            setRun(false);
-            break;
-
-        default:
-            setRun(false);
-            break;
+        case KilnState::IDLE:      setRun(false); break;
+        case KilnState::STARTING:  setRun(_blinkPhase); break;
+        case KilnState::RUNNING:   setRun(true); break;
+        case KilnState::FINISHED:  setRun(true); break;
+        case KilnState::RESETTING: setRun(_blinkPhase); break;
+        case KilnState::EMERGENCY: setRun(false); break;
+        default:                   setRun(false); break;
     }
 }
 

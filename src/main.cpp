@@ -14,30 +14,25 @@
 // main.cpp - Ponto de entrada do firmware
 // V1: simulacao no Wokwi
 //
-// Arquitetura: objetos globais estaticos (sem new/delete).
-// O KilnController recebe ponteiros para as dependencias,
-// o que permite trocar SimulatedFurnace por RealFurnace no V2
-// alterando apenas a declaracao do objeto abaixo.
-//
-// Comandos seriais (1 caractere + Enter):
+// Comandos seriais:
 //   S      - inicia o perfil ativo
 //   R      - solicita reset apos falha/fim
 //   T      - alterna entre PRODUCTION e TEST (apenas em IDLE)
 //   I      - imprime o estado completo atual
-//   X<n>   - ajusta TIME_SCALE para n (ex.: X20, X100, X1)
+//   X<n>   - ajusta TIME_SCALE para n
 //   P<n>   - ajusta periodo de telemetria para n segundos simulados
 //   ?      - mostra ajuda
 // ============================================================
 
 // ------------------------------------------------------------
-// Definicao das variaveis globais mutaveis (declaradas em Config.h)
+// Globais mutaveis (declaradas em Config.h)
 // ------------------------------------------------------------
 float     g_timeScale        = TIME_SCALE_DEFAULT;
 float     g_telemetryPeriodS = TELEMETRY_PERIOD_DEFAULT_S;
 ProfileId g_activeProfile    = PROFILE_DEFAULT;
 
 // ------------------------------------------------------------
-// Objetos globais (estaticos, vivem durante toda a execucao)
+// Objetos globais
 // ------------------------------------------------------------
 SimulatedFurnace furnace;      // V2: trocar por RealFurnace
 SSRDriver        ssr;
@@ -50,28 +45,17 @@ KilnController controller(&furnace, &ssr, &pid,
                           &detector, &telemetry, &leds);
 
 // ------------------------------------------------------------
-// Mapa de pinos (unico ponto de verdade do hardware)
-// Atribuicao campo a campo: designated initializers exigem
-// C++20 e nao compilam no Arduino core padrao (C++11).
+// Mapa de pinos (inicializado com PIN_UNASSIGNED)
 // ------------------------------------------------------------
-static HardwarePins PINS;
+static HardwarePins PINS = {
+    PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED,
+    PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED, PIN_UNASSIGNED
+};
 
-// ------------------------------------------------------------
-// Controle de tempo do loop
-// ------------------------------------------------------------
 static uint32_t lastLoopMs = 0;
 
 // ------------------------------------------------------------
-// Limites dos comandos numericos
-// ------------------------------------------------------------
-#define TIME_SCALE_MIN       1.0f
-#define TIME_SCALE_MAX       500.0f
-#define TELEMETRY_PERIOD_MIN 1.0f
-#define TELEMETRY_PERIOD_MAX 600.0f
-
-// ------------------------------------------------------------
 // Selecao de perfil
-// Arrays definidos em Config.cpp, declarados extern em Config.h.
 // ------------------------------------------------------------
 static const float (*selectProfile())[2] {
     return (g_activeProfile == PROFILE_TEST) ? TEST_POINTS
@@ -294,7 +278,11 @@ void setup() {
     PINS.buttonReset = RESET_BUTTON_PIN;
     PINS.buttonAck   = ACK_BUTTON_PIN;
 
-    controller.begin(PINS);
+    if (!controller.begin(PINS)) {
+        Serial.println("{\"ev\":\"PIN_CONFIG_INVALID\",\"state\":\"EMERGENCY\"}");
+        lastLoopMs = millis();
+        return;
+    }
 
     Serial.print("{\"ev\":\"READY\",\"profile\":\"");
     Serial.print(profileName());
@@ -323,3 +311,4 @@ void loop() {
     handleSerialCommands();
     controller.update(dtMs);
 }
+

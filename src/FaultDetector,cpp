@@ -1,5 +1,6 @@
 #include "FaultDetector.h"
 #include "Config.h"
+#include <math.h>
 
 // ------------------------------------------------------------
 // Construtor
@@ -23,21 +24,16 @@ void FaultDetector::reset() {
 FaultCode FaultDetector::update(float temperature, float setpoint,
                                 float power, bool ssrOn, float dtSim) {
 
-    // ssrOn nao e usado no V1: a deteccao de SSR travado
-    // exige realimentacao fisica, prevista para o V2.
-    (void)ssrOn;
+    (void)ssrOn;   // V2: deteccao de SSR travado exige realimentacao
 
-    // 1. Leitura invalida (aberta ou em curto)
     if (isReadingInvalid(temperature)) {
         return FaultCode::THERMOCOUPLE_OPEN;
     }
 
-    // 2. Sobretemperatura (prioridade sobre sensor travado)
     if (isOverTemperature(temperature)) {
         return FaultCode::OVER_TEMPERATURE;
     }
 
-    // 3. Sensor travado
     if (isSensorStuck(temperature, setpoint, power, dtSim)) {
         return FaultCode::SENSOR_STUCK;
     }
@@ -56,7 +52,6 @@ bool FaultDetector::isReadingInvalid(float temperature) const {
     if (temperature < MIN_VALID_TEMP_C) {
         return true;
     }
-    // Termopar em curto pode ler valores absurdamente altos
     if (temperature > (SAFETY_LIMIT_C + 200.0f)) {
         return true;
     }

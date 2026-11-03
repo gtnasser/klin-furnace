@@ -1,0 +1,2465 @@
+
+
+### 📄 config.h:
+
+```text
+#pragma once
+
+//
+// =====================================================
+// CONFIGURAÇÕES GERAIS
+// =====================================================
+//
+
+//
+// GPIOs
+//
+
+constexpr int LED_RUN_PIN = 4;
+constexpr int LED_FAULT_PIN = 2;
+constexpr int LED_ACK_PIN = 15;
+
+constexpr int RESET_BUTTON_PIN = 18;
+constexpr int ACK_BUTTON_PIN = 5;
+
+constexpr int BUZZER_PIN = 19;
+
+//
+// Segurança do forno
+//
+
+constexpr float MAX_KILN_TEMP_C = 1100.0f;
+
+constexpr float SAFETY_LIMIT_C = 1150.0f;
+
+constexpr float RESET_ALLOWED_C = 200.0f;
+
+//
+// SSR
+//
+
+constexpr float SSR_WINDOW_SEC = 10.0f;
+
+//
+// Simulação
+//
+
+constexpr float TIME_SCALE = 10.0f;
+
+//
+// PID
+//
+
+constexpr float PID_OUTPUT_MIN = 0.0f;
+constexpr float PID_OUTPUT_MAX = 100.0f;
+
+constexpr float PID_DEFAULT_INTEGRAL_LIMIT = 1000.0f;
+```
+
+### 📄 FaultDetector,cpp:
+
+```text
+#include "FaultDetector.h"
+
+#include "Config.h"
+
+#include <cmath>
+
+//
+// =====================================================
+// CONFIGURAÇÕES INTERNAS
+// =====================================================
+//
+
+namespace
+{
+    constexpr float SENSOR_DELTA_EPSILON =
+        0.01f;
+
+    constexpr float SENSOR_STUCK_TIME_SEC =
+        300.0f;
+
+    constexpr float MIN_VALID_TEMP =
+        0.0f;
+
+    constexpr float MAX_VALID_TEMP =
+        1300.0f;
+}
+
+FaultDetector::FaultDetector()
+{
+    reset();
+}
+
+void FaultDetector::reset()
+{
+    _currentFault =
+        NO_FAULT;
+
+    _lastTemperature =
+        0.0f;
+
+    _stuckTime =
+        0.0f;
+}
+
+FaultCode FaultDetector::update(
+    float temperature,
+    float pidOutput,
+    bool ssrActive,
+    float dtSeconds)
+{
+    //
+    // NAN = termopar aberto
+    //
+
+    if(std::isnan(temperature))
+    {
+        _currentFault =
+            THERMOCOUPLE_OPEN;
+
+        return _currentFault;
+    }
+
+    //
+    // Faixa inválida
+    //
+
+    if(
+        temperature <
+        MIN_VALID_TEMP)
+    {
+        _currentFault =
+            TEMPERATURE_OUT_OF_RANGE;
+
+        return _currentFault;
+    }
+
+    if(
+        temperature >
+        MAX_VALID_TEMP)
+    {
+        _currentFault =
+            TEMPERATURE_OUT_OF_RANGE;
+
+        return _currentFault;
+    }
+
+    //
+    // Sobretemperatura
+    //
+
+    if(
+        temperature >=
+        SAFETY_LIMIT_C)
+    {
+        _currentFault =
+            OVERTEMPERATURE;
+
+        return _currentFault;
+    }
+
+    //
+    // Sensor travado
+    //
+    // Só verifica quando:
+    //
+    // - PID está pedindo potência
+    // - SSR está ligado
+    //
+
+    float delta =
+        std::fabs(
+            temperature -
+            _lastTemperature);
+
+    if(
+        ssrActive &&
+        pidOutput > 60.0f)
+    {
+        if(
+            delta <
+            SENSOR_DELTA_EPSILON)
+        {
+            _stuckTime +=
+                dtSeconds;
+
+            if(
+                _stuckTime >=
+                SENSOR_STUCK_TIME_SEC)
+            {
+                _currentFault =
+                    SENSOR_STUCK;
+
+                return _currentFault;
+            }
+        }
+        else
+        {
+            _stuckTime =
+                0.0f;
+        }
+    }
+    else
+    {
+        _stuckTime =
+            0.0f;
+    }
+
+    _lastTemperature =
+        temperature;
+
+    _currentFault =
+        NO_FAULT;
+
+    return _currentFault;
+}
+
+bool FaultDetector::hasFault() const
+{
+    return
+        _currentFault !=
+        NO_FAULT;
+}
+
+FaultCode FaultDetector::getFault() const
+{
+    return _currentFault;
+}
+```
+
+### 📄 FaultDetector.h:
+
+```text
+#pragma once
+
+#include "Types.h"
+
+//
+// =====================================================
+// DETECTOR DE FALHAS
+//
+// Responsável por:
+//
+// - termopar aberto
+// - temperatura inválida
+// - sensor travado
+// - sobretemperatura
+//
+// =====================================================
+//
+
+class FaultDetector
+{
+public:
+
+    FaultDetector();
+
+    FaultCode update(
+        float temperature,
+        float pidOutput,
+        bool ssrActive,
+        float dtSeconds);
+
+    void reset();
+
+    bool hasFault() const;
+
+    FaultCode getFault() const;
+
+private:
+
+    FaultCode _currentFault;
+
+    float _lastTemperature;
+
+    float _stuckTime;
+};
+```
+
+### 📄 IFurnace.h:
+
+```text
+#pragma once
+
+//
+// =====================================================
+// INTERFACE DO FORNO
+//
+// Todas as implementações do sistema:
+//
+// - SimulatedFurnace
+// - RealFurnace (futuro)
+//
+// Devem implementar esta interface.
+//
+// =====================================================
+//
+
+class IFurnace
+{
+public:
+
+    virtual ~IFurnace() = default;
+
+    //
+    // Temperatura medida pelo sensor.
+    //
+
+    virtual float getTemperature() = 0;
+
+    //
+    // Potência aplicada ao forno.
+    //
+    // Faixa:
+    //
+    // 0 .. 100 %
+    //
+
+    virtual void setPower(
+        float percent) = 0;
+
+    //
+    // Atualização do modelo.
+    //
+
+    virtual void update(
+        float dtSeconds) = 0;
+
+    //
+    // Desligamento forçado.
+    //
+    // Utilizado por EMERGENCY.
+    //
+
+    virtual void forceShutdown() = 0;
+};
+```
+
+### 📄 KilnController.cpp:
+
+```text
+#include "KilnController.h"
+
+#include "KilnProfile.h"
+#include "PIDController.h"
+#include "SSRDriver.h"
+#include "FaultDetector.h"
+#include "IFurnace.h"
+
+#include "Config.h"
+
+//
+// =====================================================
+// CONSTRUTOR
+// =====================================================
+//
+
+KilnController::KilnController(
+    KilnProfile* profile,
+    PIDController* pid,
+    SSRDriver* ssr,
+    FaultDetector* faultDetector,
+    IFurnace* furnace)
+{
+    _profile = profile;
+
+    _pid = pid;
+
+    _ssr = ssr;
+
+    _faultDetector =
+        faultDetector;
+
+    _furnace = furnace;
+
+    _state = IDLE;
+
+    _currentFault =
+        NO_FAULT;
+
+    _latchedFault =
+        NO_FAULT;
+
+    _alarmSequence =
+        0;
+
+    _lastAlarmFault =
+        NO_FAULT;
+
+    _setpoint = 0.0f;
+
+    _processValue = 0.0f;
+
+    _pidOutput = 0.0f;
+
+    _ssrState = false;
+}
+
+//
+// =====================================================
+// START
+// =====================================================
+//
+
+bool KilnController::start()
+{
+    if(_state != IDLE)
+    {
+        return false;
+    }
+
+    _state =
+        STARTING;
+
+    return true;
+}
+
+//
+// =====================================================
+// RESET
+// =====================================================
+//
+
+bool KilnController::reset()
+{
+    if(_state != EMERGENCY &&
+       _state != FINISHED)
+    {
+        return false;
+    }
+
+    //
+    // Temperatura segura?
+    //
+
+    if(
+        _furnace->getTemperature()
+        >
+        RESET_ALLOWED_C)
+    {
+        return false;
+    }
+
+    _state =
+        RESETTING;
+
+    return true;
+}
+
+//
+// =====================================================
+// UPDATE
+// =====================================================
+//
+
+void KilnController::update(
+    float elapsedMinutes,
+    float currentTimeSeconds,
+    float dtSeconds)
+{
+    //
+    // RESETTING
+    //
+
+    if(
+        _state ==
+        RESETTING)
+    {
+        _pid->reset();
+
+        _faultDetector
+            ->reset();
+
+        _currentFault =
+            NO_FAULT;
+
+        _latchedFault =
+            NO_FAULT;
+
+        _alarmSequence =
+            0;
+
+        _lastAlarmFault =
+            NO_FAULT;
+
+        _state =
+            IDLE;
+
+        return;
+    }
+
+    //
+    // STARTING
+    //
+
+    if(
+        _state ==
+        STARTING)
+    {
+        if(startupChecks())
+        {
+            _pid->reset();
+
+            _state =
+                RUNNING;
+        }
+        else
+        {
+            enterEmergency(
+                _currentFault);
+        }
+
+        return;
+    }
+
+    //
+    // EMERGENCY
+    //
+
+    if(
+        _state ==
+        EMERGENCY)
+    {
+        _ssr->forceOff();
+
+        _furnace
+            ->forceShutdown();
+
+        return;
+    }
+
+    //
+    // RUNNING
+    //
+
+    if(
+        _state ==
+        RUNNING)
+    {
+        updateRunning(
+            elapsedMinutes,
+            currentTimeSeconds,
+            dtSeconds);
+
+        return;
+    }
+}
+
+//
+// =====================================================
+// LOOP DE PROCESSO
+// =====================================================
+//
+
+void KilnController::updateRunning(
+    float elapsedMinutes,
+    float currentTimeSeconds,
+    float dtSeconds)
+{
+    if(
+        _profile->isFinished(
+            elapsedMinutes))
+    {
+        _pid->reset();
+
+        _furnace
+            ->setPower(0);
+
+        _state =
+            FINISHED;
+
+        return;
+    }
+
+    _setpoint =
+        _profile
+            ->getSetpoint(
+                elapsedMinutes);
+
+    _processValue =
+        _furnace
+            ->getTemperature();
+
+    _pidOutput =
+        _pid
+            ->compute(
+                _setpoint,
+                _processValue,
+                dtSeconds);
+
+    _ssr->setOutput(
+        _pidOutput);
+
+    _ssrState =
+        _ssr->isOn(
+            currentTimeSeconds);
+
+    _furnace->setPower(
+        _ssrState ?
+        100.0f :
+        0.0f);
+
+    _currentFault =
+        _faultDetector
+            ->update(
+                _processValue,
+                _pidOutput,
+                _ssrState,
+                dtSeconds);
+
+    //
+    // Nova falha
+    //
+
+    if(
+        _currentFault !=
+        NO_FAULT &&
+        _currentFault !=
+        _lastAlarmFault)
+    {
+        _alarmSequence++;
+
+        _lastAlarmFault =
+            _currentFault;
+    }
+
+    if(
+        isCriticalFault(
+            _currentFault))
+    {
+        enterEmergency(
+            _currentFault);
+    }
+}
+
+//
+// =====================================================
+// CHECKLIST
+// =====================================================
+//
+
+bool KilnController::startupChecks()
+{
+    if(!_profile)
+    {
+        _currentFault =
+            HEATING_FAILURE;
+
+        return false;
+    }
+
+    if(
+        !_profile
+             ->validate())
+    {
+        _currentFault =
+            HEATING_FAILURE;
+
+        return false;
+    }
+
+    return true;
+}
+
+//
+// =====================================================
+// CRÍTICA?
+// =====================================================
+//
+
+bool KilnController::isCriticalFault(
+    FaultCode fault)
+{
+    switch(fault)
+    {
+        case THERMOCOUPLE_OPEN:
+        case SENSOR_STUCK:
+        case OVERTEMPERATURE:
+        case SSR_STUCK_ON:
+            return true;
+
+        default:
+            return false;
+    }
+}
+
+//
+// =====================================================
+// EMERGÊNCIA
+// =====================================================
+//
+
+void KilnController::enterEmergency(
+    FaultCode fault)
+{
+    _latchedFault =
+        fault;
+
+    _state =
+        EMERGENCY;
+
+    _pid->reset();
+
+    _ssr->forceOff();
+
+    _furnace
+        ->forceShutdown();
+}
+
+//
+// =====================================================
+// GETTERS
+// =====================================================
+//
+
+ControllerState
+KilnController::getState() const
+{
+    return _state;
+}
+
+FaultCode
+KilnController::getFault() const
+{
+    return _currentFault;
+}
+
+FaultCode
+KilnController::getLatchedFault() const
+{
+    return _latchedFault;
+}
+
+bool
+KilnController::isEmergency() const
+{
+    return
+        _state ==
+        EMERGENCY;
+}
+
+uint32_t
+KilnController::getAlarmSequence()
+const
+{
+    return _alarmSequence;
+}
+
+ProcessSnapshot
+KilnController::getSnapshot()
+const
+{
+    ProcessSnapshot snapshot;
+
+    snapshot.state =
+        _state;
+
+    snapshot.fault =
+        _currentFault;
+
+    snapshot.setpoint =
+        _setpoint;
+
+    snapshot.processValue =
+        _processValue;
+
+    snapshot.pidOutput =
+        _pidOutput;
+
+    snapshot.ssrState =
+        _ssrState;
+
+    return snapshot;
+}
+```
+
+### 📄 KilnController.h:
+
+```text
+#pragma once
+
+#include <stdint.h>
+
+#include "Types.h"
+
+//
+// Forward declarations
+//
+
+class KilnProfile;
+class PIDController;
+class SSRDriver;
+class FaultDetector;
+class IFurnace;
+
+//
+// =====================================================
+// CONTROLADOR PRINCIPAL
+//
+// Responsável por:
+//
+// - máquina de estados
+// - integração dos módulos
+// - emergência
+// - snapshot do processo
+//
+// =====================================================
+//
+
+class KilnController
+{
+public:
+
+    KilnController(
+        KilnProfile* profile,
+        PIDController* pid,
+        SSRDriver* ssr,
+        FaultDetector* faultDetector,
+        IFurnace* furnace);
+
+    //
+    // Atualização principal
+    //
+
+    void update(
+        float elapsedMinutes,
+        float currentTimeSeconds,
+        float dtSeconds);
+
+    //
+    // Comandos externos
+    //
+
+    bool start();
+
+    bool reset();
+
+    //
+    // Estado atual
+    //
+
+    ControllerState getState() const;
+
+    //
+    // Última falha ativa
+    //
+
+    FaultCode getFault() const;
+
+    //
+    // Falha que disparou
+    // emergência.
+    //
+
+    FaultCode getLatchedFault() const;
+
+    //
+    // Processo está em emergência?
+    //
+
+    bool isEmergency() const;
+
+    //
+    // Sequência dos alarmes
+    //
+
+    uint32_t getAlarmSequence() const;
+
+    //
+    // Snapshot
+    //
+
+    ProcessSnapshot getSnapshot() const;
+
+private:
+
+    //
+    // Dependências
+    //
+
+    KilnProfile* _profile;
+
+    PIDController* _pid;
+
+    SSRDriver* _ssr;
+
+    FaultDetector* _faultDetector;
+
+    IFurnace* _furnace;
+
+    //
+    // Estado
+    //
+
+    ControllerState _state;
+
+    //
+    // Falha atual
+    //
+
+    FaultCode _currentFault;
+
+    //
+    // Falha latched
+    //
+
+    FaultCode _latchedFault;
+
+    //
+    // Controle de alarmes
+    //
+
+    uint32_t _alarmSequence;
+
+    FaultCode _lastAlarmFault;
+
+    //
+    // Valores atuais
+    //
+
+    float _setpoint;
+
+    float _processValue;
+
+    float _pidOutput;
+
+    bool _ssrState;
+
+private:
+
+    //
+    // Internos
+    //
+
+    bool startupChecks();
+
+    bool isCriticalFault(
+        FaultCode fault);
+
+    void enterEmergency(
+        FaultCode fault);
+
+    void updateRunning(
+        float elapsedMinutes,
+        float currentTimeSeconds,
+        float dtSeconds);
+};
+```
+
+### 📄 KilnProfile.cpp:
+
+```text
+#include "KilnProfile.h"
+
+#include "Config.h"
+
+#include <cmath>
+
+//
+// =====================================================
+// CONSTRUTOR
+// =====================================================
+//
+
+KilnProfile::KilnProfile(
+    const ProfilePoint* points,
+    int count)
+{
+    _points = points;
+
+    _count = count;
+}
+
+//
+// =====================================================
+// CALCULA O SETPOINT PARA O INSTANTE ATUAL
+//
+// Utiliza interpolação linear entre dois pontos.
+//
+// Exemplo:
+//
+// (180,300)
+// (420,900)
+//
+// para t=300min:
+//
+// SP = 600°C
+//
+// =====================================================
+//
+
+float KilnProfile::getSetpoint(
+    float elapsedMinutes) const
+{
+    //
+    // Proteção contra perfil inválido
+    //
+
+    if(
+        _points == nullptr ||
+        _count <= 0)
+    {
+        return 0.0f;
+    }
+
+    //
+    // Antes do primeiro ponto.
+    // Mantém a temperatura inicial.
+    //
+
+    if(
+        elapsedMinutes <=
+        _points[0].timeMin)
+    {
+        return
+            _points[0]
+                .temperature;
+    }
+
+    //
+    // Procura o segmento atual.
+    //
+
+    for(
+        int i = 1;
+        i < _count;
+        i++)
+    {
+        if(
+            elapsedMinutes <=
+            _points[i]
+                .timeMin)
+        {
+            float t0 =
+                _points[i - 1]
+                    .timeMin;
+
+            float t1 =
+                _points[i]
+                    .timeMin;
+
+            float y0 =
+                _points[i - 1]
+                    .temperature;
+
+            float y1 =
+                _points[i]
+                    .temperature;
+
+            //
+            // Proteção contra
+            // divisão por zero.
+            //
+
+            float deltaTime =
+                t1 - t0;
+
+            if(deltaTime <= 0.0f)
+            {
+                return y1;
+            }
+
+            float fraction =
+                (elapsedMinutes - t0)
+                /
+                deltaTime;
+
+            return
+                y0 +
+                fraction *
+                (y1 - y0);
+        }
+    }
+
+    //
+    // Após o último ponto.
+    //
+
+    return
+        _points[
+            _count - 1]
+            .temperature;
+}
+
+//
+// =====================================================
+// ETAPA ATUAL
+//
+// Retorna:
+//
+// 0 = etapa 1
+// 1 = etapa 2
+// 2 = etapa 3
+//
+// Uso interno em índice base zero.
+//
+// =====================================================
+//
+
+int KilnProfile::getStage(
+    float elapsedMinutes) const
+{
+    if(
+        _points == nullptr ||
+        _count < 2)
+    {
+        return 0;
+    }
+
+    for(
+        int i = 1;
+        i < _count;
+        i++)
+    {
+        if(
+            elapsedMinutes <=
+            _points[i]
+                .timeMin)
+        {
+            return i - 1;
+        }
+    }
+
+    //
+    // Última etapa.
+    //
+
+    return _count - 2;
+}
+
+//
+// =====================================================
+// QUANTIDADE DE ETAPAS
+//
+// Exemplo:
+//
+// 4 pontos
+// => 3 etapas
+//
+// =====================================================
+//
+
+int KilnProfile::getStageCount() const
+{
+    if(_count < 2)
+    {
+        return 0;
+    }
+
+    return _count - 1;
+}
+
+//
+// =====================================================
+// PERFIL CONCLUÍDO?
+//
+// =====================================================
+//
+
+bool KilnProfile::isFinished(
+    float elapsedMinutes) const
+{
+    if(
+        _points == nullptr ||
+        _count < 2)
+    {
+        return true;
+    }
+
+    return
+        elapsedMinutes >=
+        _points[
+            _count - 1]
+            .timeMin;
+}
+
+//
+// =====================================================
+// VALIDAÇÃO DO PERFIL
+//
+// Verifica:
+//
+// - ponteiro válido
+// - quantidade mínima de pontos
+// - primeiro ponto inicia em t=0
+// - temperaturas válidas
+// - tempos crescentes
+// - perfil monotônico
+//
+// =====================================================
+//
+
+bool KilnProfile::validate() const
+{
+    //
+    // Ponteiro inválido
+    //
+
+    if(_points == nullptr)
+    {
+        return false;
+    }
+
+    //
+    // Mínimo:
+    // início e fim
+    //
+
+    if(_count < 2)
+    {
+        return false;
+    }
+
+    //
+    // Primeiro ponto deve iniciar
+    // em t=0.
+    //
+
+    if(
+        std::fabs(
+            _points[0]
+                .timeMin)
+        > 0.001f)
+    {
+        return false;
+    }
+
+    //
+    // Verificação individual
+    // dos pontos.
+    //
+
+    for(
+        int i = 0;
+        i < _count;
+        i++)
+    {
+        float temperature =
+            _points[i]
+                .temperature;
+
+        //
+        // Não aceita
+        // temperatura negativa.
+        //
+
+        if(
+            temperature < 0.0f)
+        {
+            return false;
+        }
+
+        //
+        // Não aceita ponto
+        // acima da capacidade
+        // nominal do forno.
+        //
+
+        if(
+            temperature >
+            MAX_KILN_TEMP_C)
+        {
+            return false;
+        }
+    }
+
+    //
+    // Verificação da sequência.
+    //
+
+    for(
+        int i = 1;
+        i < _count;
+        i++)
+    {
+        //
+        // Tempo deve ser crescente.
+        //
+
+        if(
+            _points[i]
+                .timeMin <=
+            _points[i - 1]
+                .timeMin)
+        {
+            return false;
+        }
+
+        //
+        // Perfil monotônico.
+        //
+        // V1 não permite
+        // resfriamento programado.
+        //
+
+        if(
+            _points[i]
+                .temperature <
+            _points[i - 1]
+                .temperature)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+//
+// =====================================================
+// QUANTIDADE DE PONTOS
+//
+// =====================================================
+//
+
+int KilnProfile::getPointCount() const
+{
+    return _count;
+}
+```
+
+### 📄 KilnProfile.h:
+
+```text
+#pragma once
+
+//
+// =====================================================
+// PONTO DA CURVA DE QUEIMA
+// =====================================================
+//
+
+struct ProfilePoint
+{
+    float timeMin;
+
+    float temperature;
+};
+
+//
+// =====================================================
+// PERFIL DE QUEIMA
+//
+// Faz interpolação linear
+// dos pontos.
+//
+// =====================================================
+//
+
+class KilnProfile
+{
+public:
+
+    KilnProfile(
+        const ProfilePoint* points,
+        int count);
+
+    float getSetpoint(
+        float elapsedMinutes) const;
+
+    int getStage(
+        float elapsedMinutes) const;
+
+    int getStageCount() const;
+
+    bool isFinished(
+        float elapsedMinutes) const;
+
+    bool validate() const;
+
+    int getPointCount() const;
+
+private:
+
+    const ProfilePoint* _points;
+
+    int _count;
+};
+```
+
+### 📄 m,ain.cpp:
+
+```text
+
+```
+
+### 📄 PIDController.cpp:
+
+```text
+#include "PIDController.h"
+
+#include <algorithm>
+#include <cmath>
+
+//
+// =====================================================
+// CONSTRUTOR
+// =====================================================
+//
+
+PIDController::PIDController(
+    float kp,
+    float ki,
+    float kd,
+    float integralLimit)
+{
+    _kp = kp;
+    _ki = ki;
+    _kd = kd;
+
+    _integral = 0.0f;
+
+    //
+    // Garante limite positivo.
+    //
+
+    _integralLimit =
+        std::fabs(integralLimit);
+
+    _previousError =
+        0.0f;
+
+    _lastOutput =
+        0.0f;
+
+    _firstRun =
+        true;
+}
+
+//
+// =====================================================
+// COMPUTE
+//
+// Executa um ciclo PID.
+//
+// Entradas:
+//
+//  setpoint
+//  processValue
+//  dtSeconds
+//
+// Saída:
+//
+//  0 .. 100%
+//
+// =====================================================
+//
+
+float PIDController::compute(
+    float setpoint,
+    float processValue,
+    float dtSeconds)
+{
+    //
+    // Proteção contra dt inválido
+    //
+
+    if(dtSeconds <= 0.0f)
+    {
+        return _lastOutput;
+    }
+
+    //
+    // Proteção contra NaN
+    //
+
+    if(std::isnan(setpoint))
+    {
+        return _lastOutput;
+    }
+
+    if(std::isnan(processValue))
+    {
+        return _lastOutput;
+    }
+
+    //
+    // ERRO
+    //
+
+    float error =
+        setpoint -
+        processValue;
+
+    //
+    // =================================================
+    // ANTI-WINDUP
+    //
+    // Integra somente quando a saída
+    // não está saturada na mesma direção
+    // do erro.
+    // =================================================
+    //
+
+    bool saturatedHigh =
+        (_lastOutput >=
+         PID_OUTPUT_MAX);
+
+    bool saturatedLow =
+        (_lastOutput <=
+         PID_OUTPUT_MIN);
+
+    bool allowIntegral =
+        true;
+
+    if(
+        saturatedHigh &&
+        error > 0.0f)
+    {
+        allowIntegral =
+            false;
+    }
+
+    if(
+        saturatedLow &&
+        error < 0.0f)
+    {
+        allowIntegral =
+            false;
+    }
+
+    if(allowIntegral)
+    {
+        _integral +=
+            error *
+            dtSeconds;
+    }
+
+    //
+    // Limite da integral
+    //
+
+    _integral =
+        std::clamp(
+            _integral,
+            -_integralLimit,
+            _integralLimit);
+
+    //
+    // =================================================
+    // DERIVADA
+    // =================================================
+    //
+
+    float derivative =
+        0.0f;
+
+    if(!_firstRun)
+    {
+        derivative =
+            (
+              error
+              -
+              _previousError
+            )
+            /
+            dtSeconds;
+    }
+
+    _firstRun =
+        false;
+
+    //
+    // Guarda erro para o próximo ciclo
+    //
+
+    _previousError =
+        error;
+
+    //
+    // =================================================
+    // PID
+    // =================================================
+    //
+
+    float output =
+          (_kp * error)
+        + (_ki * _integral)
+        + (_kd * derivative);
+
+    //
+    // Saturação da saída
+    //
+
+    output =
+        std::clamp(
+            output,
+            PID_OUTPUT_MIN,
+            PID_OUTPUT_MAX);
+
+    _lastOutput =
+        output;
+
+    return output;
+}
+
+//
+// =====================================================
+// RESET COMPLETO
+//
+// Utilizado em:
+//
+// - RESET do ciclo
+// - RESET da emergência
+//
+// =====================================================
+//
+
+void PIDController::reset()
+{
+    _integral = 0.0f;
+
+    _previousError = 0.0f;
+
+    _lastOutput = 0.0f;
+
+    _firstRun = true;
+}
+
+//
+// =====================================================
+// RESET APENAS DA INTEGRAL
+//
+// Útil em mudanças de etapa.
+//
+// =====================================================
+//
+
+void PIDController::resetIntegral()
+{
+    _integral = 0.0f;
+}
+
+//
+// =====================================================
+// ÚLTIMA SAÍDA CALCULADA
+//
+// =====================================================
+//
+
+float PIDController::getOutput() const
+{
+    return _lastOutput;
+}
+```
+
+### 📄 PIDController.h:
+
+```text
+#pragma once
+
+#include "Config.h"
+
+//
+// =====================================================
+// CONTROLADOR PID
+//
+// Responsável por:
+//
+// - Erro
+// - Integral
+// - Derivada
+// - Anti-windup
+//
+// Saída:
+//
+// 0..100 %
+//
+// =====================================================
+//
+
+class PIDController
+{
+public:
+
+    PIDController(
+        float kp,
+        float ki,
+        float kd,
+        float integralLimit =
+            PID_DEFAULT_INTEGRAL_LIMIT);
+
+    float compute(
+        float setpoint,
+        float processValue,
+        float dtSeconds);
+
+    void reset();
+
+    void resetIntegral();
+
+    float getOutput() const;
+
+private:
+
+    float _kp;
+    float _ki;
+    float _kd;
+
+    float _integral;
+
+    float _integralLimit;
+
+    float _previousError;
+
+    float _lastOutput;
+
+    bool _firstRun;
+};
+```
+
+### 📄 SimulatedFornace.cpp:
+
+```text
+#include "SimulatedFurnace.h"
+
+#include "Config.h"
+
+#include <algorithm>
+
+//
+// =====================================================
+// MODELO TÉRMICO
+// =====================================================
+//
+
+namespace
+{
+    constexpr float AMBIENT_TEMP =
+        25.0f;
+
+    constexpr float HEATER_POWER_W =
+        3000.0f;
+
+    //
+    // Massa térmica
+    //
+
+    constexpr float THERMAL_MASS =
+        20000.0f;
+
+    //
+    // Perdas
+    //
+
+    constexpr float LOSS_COEF =
+        2.5f;
+
+    //
+    // Inércia do termopar
+    //
+
+    constexpr float SENSOR_TAU =
+        30.0f;
+}
+
+SimulatedFurnace::
+SimulatedFurnace()
+{
+    _chamberTemperature =
+        AMBIENT_TEMP;
+
+    _sensorTemperature =
+        AMBIENT_TEMP;
+
+    _powerPercent =
+        0.0f;
+
+    _thermalFuseOpen =
+        false;
+}
+
+float SimulatedFurnace::
+getTemperature()
+{
+    return
+        _sensorTemperature;
+}
+
+float SimulatedFurnace::
+getChamberTemperature()
+const
+{
+    return
+        _chamberTemperature;
+}
+
+void SimulatedFurnace::
+setPower(
+    float percent)
+{
+    percent =
+        std::clamp(
+            percent,
+            0.0f,
+            100.0f);
+
+    _powerPercent =
+        percent;
+}
+
+float SimulatedFurnace::
+getPower() const
+{
+    return
+        _powerPercent;
+}
+
+//
+// =====================================================
+// EMERGÊNCIA
+// =====================================================
+//
+
+void SimulatedFurnace::
+forceShutdown()
+{
+    _powerPercent =
+        0.0f;
+}
+
+//
+// =====================================================
+// MODELO DE FORNO
+// =====================================================
+//
+
+void SimulatedFurnace::
+update(
+    float dtSeconds)
+{
+    if(dtSeconds <= 0.0f)
+    {
+        return;
+    }
+
+    //
+    // Fusível térmico
+    //
+
+    if(
+        _chamberTemperature >=
+        SAFETY_LIMIT_C)
+    {
+        _thermalFuseOpen =
+            true;
+    }
+
+    //
+    // Potência de entrada
+    //
+
+    float inputPower =
+        0.0f;
+
+    if(!_thermalFuseOpen)
+    {
+        inputPower =
+            HEATER_POWER_W *
+            (_powerPercent /
+             100.0f);
+    }
+
+    //
+    // Diferença térmica
+    //
+
+    float delta =
+        _chamberTemperature -
+        AMBIENT_TEMP;
+
+    //
+    // Perdas
+    //
+
+    float losses =
+        LOSS_COEF *
+        delta;
+
+    //
+    // Maior perda em
+    // alta temperatura
+    //
+
+    if(
+        _chamberTemperature >
+        700.0f)
+    {
+        float factor =
+            (
+              _chamberTemperature
+              -
+              700.0f
+            )
+            /
+            400.0f;
+
+        losses *=
+            (
+              1.0f
+              +
+              factor *
+              factor
+            );
+    }
+
+    //
+    // Potência líquida
+    //
+
+    float netPower =
+        inputPower -
+        losses;
+
+    //
+    // Variação térmica
+    //
+
+    float dT =
+        (
+          netPower /
+          THERMAL_MASS
+        )
+        *
+        dtSeconds;
+
+    _chamberTemperature +=
+        dT;
+
+    //
+    // Limite inferior
+    //
+
+    if(
+        _chamberTemperature <
+        AMBIENT_TEMP)
+    {
+        _chamberTemperature =
+            AMBIENT_TEMP;
+    }
+
+    //
+    // Termopar
+    //
+    // Modelo de primeira
+    // ordem.
+    //
+
+    _sensorTemperature +=
+        (
+          _chamberTemperature
+          -
+          _sensorTemperature
+        )
+        *
+        (
+          dtSeconds /
+          SENSOR_TAU
+        );
+}
+```
+
+### 📄 SimulateFornace.h:
+
+```text
+#pragma once
+
+#include "IFurnace.h"
+
+//
+// =====================================================
+// FORNO SIMULADO
+//
+// Modelo térmico:
+//
+// Câmara
+// ↓
+// Termopar
+//
+// =====================================================
+//
+
+class SimulatedFurnace :
+    public IFurnace
+{
+public:
+
+    SimulatedFurnace();
+
+    //
+    // Temperatura lida
+    // pelo termopar.
+    //
+
+    float getTemperature()
+        override;
+
+    //
+    // Temperatura real
+    // da câmara.
+    //
+
+    float getChamberTemperature()
+        const;
+
+    void setPower(
+        float percent)
+        override;
+
+    void update(
+        float dtSeconds)
+        override;
+
+    void forceShutdown()
+        override;
+
+    float getPower() const;
+
+private:
+
+    //
+    // Câmara
+    //
+
+    float _chamberTemperature;
+
+    //
+    // Termopar
+    //
+
+    float _sensorTemperature;
+
+    //
+    // Potência
+    //
+
+    float _powerPercent;
+    //
+    // Fusível térmico
+    //
+
+    bool _thermalFuseOpen;
+};
+```
+
+### 📄 SSRDrive.cpp:
+
+```text
+#include "SSRDriver.h"
+
+#include <algorithm>
+#include <cmath>
+
+//
+// =====================================================
+// CONSTRUTOR
+// =====================================================
+//
+
+SSRDriver::SSRDriver(
+    float windowSeconds)
+{
+    //
+    // Proteção contra
+    // janela inválida.
+    //
+
+    if(
+        !std::isfinite(
+            windowSeconds) ||
+        windowSeconds <= 0.0f)
+    {
+        windowSeconds =
+            10.0f;
+    }
+
+    _windowSeconds =
+        windowSeconds;
+
+    _requestedPower =
+        0.0f;
+
+    _forcedOff =
+        false;
+
+    _currentState =
+        false;
+}
+
+//
+// =====================================================
+// DEFINE POTÊNCIA
+//
+// Entrada:
+// 0 .. 100 %
+//
+// =====================================================
+//
+
+void SSRDriver::setOutput(
+    float percent)
+{
+    //
+    // Proteção contra
+    // NaN / INF
+    //
+
+    if(
+        !std::isfinite(
+            percent))
+    {
+        percent = 0.0f;
+    }
+
+    _requestedPower =
+        std::clamp(
+            percent,
+            0.0f,
+            100.0f);
+}
+
+//
+// =====================================================
+// CÁLCULO DO ESTADO DO SSR
+//
+// Exemplo:
+//
+// Janela = 10 s
+//
+// Potência = 30 %
+//
+// ON  = 3 s
+// OFF = 7 s
+//
+// =====================================================
+//
+
+bool SSRDriver::isOn(
+    float currentTimeSeconds)
+{
+    //
+    // Lock de emergência
+    //
+
+    if(_forcedOff)
+    {
+        _currentState =
+            false;
+
+        return false;
+    }
+
+    //
+    // Tempo inválido
+    //
+
+    if(
+        !std::isfinite(
+            currentTimeSeconds))
+    {
+        _currentState =
+            false;
+
+        return false;
+    }
+
+    //
+    // Casos extremos
+    //
+
+    if(
+        _requestedPower <=
+        0.0f)
+    {
+        _currentState =
+            false;
+
+        return false;
+    }
+
+    if(
+        _requestedPower >=
+        100.0f)
+    {
+        _currentState =
+            true;
+
+        return true;
+    }
+
+    //
+    // Posição atual
+    // da janela
+    //
+
+    float position =
+        std::fmod(
+            currentTimeSeconds,
+            _windowSeconds);
+
+    if(position < 0.0f)
+    {
+        position = 0.0f;
+    }
+
+    //
+    // Tempo ON
+    //
+
+    float onTime =
+        _windowSeconds *
+        (
+            _requestedPower /
+            100.0f
+        );
+
+    _currentState =
+        (
+            position <
+            onTime
+        );
+
+    return _currentState;
+}
+
+//
+// =====================================================
+// FORCE OFF
+//
+// Utilizado em:
+//
+// - EMERGENCY
+//
+// =====================================================
+//
+
+void SSRDriver::forceOff()
+{
+    _forcedOff =
+        true;
+
+    _currentState =
+        false;
+
+    //
+    // Remove potência residual.
+    //
+
+    _requestedPower =
+        0.0f;
+}
+
+//
+// =====================================================
+// RESET
+//
+// Libera um SSR que foi
+// desabilitado por emergência.
+//
+// Deve ser chamado durante:
+//
+// RESETTING
+//
+// =====================================================
+//
+
+void SSRDriver::reset()
+{
+    _forcedOff =
+        false;
+
+    _currentState =
+        false;
+
+    _requestedPower =
+        0.0f;
+}
+
+//
+// =====================================================
+// GETTERS
+// =====================================================
+//
+
+float SSRDriver::getRequestedPower() const
+{
+    return _requestedPower;
+}
+
+bool SSRDriver::getState() const
+{
+    return _currentState;
+}
+```
+
+### 📄 SSRDriver.h:
+
+```text
+#pragma once
+
+class SSRDriver
+{
+public:
+
+    explicit SSRDriver(
+        float windowSeconds);
+
+    void setOutput(
+        float percent);
+
+    bool isOn(
+        float currentTimeSeconds);
+
+    void forceOff();
+
+    void reset();
+
+    float getRequestedPower() const;
+
+    bool getState() const;
+
+private:
+
+    float _requestedPower;
+
+    float _windowSeconds;
+
+    bool _forcedOff;
+
+    bool _currentState;
+};
+```
+
+### 📄 StatusLeds,h:
+
+```text
+#pragma once
+
+#include "Types.h"
+
+class StatusLeds
+{
+public:
+
+    StatusLeds(
+        int runPin,
+        int faultPin,
+        int mutePin);
+
+    void begin();
+
+    void update(
+        ControllerState controller,
+        AlarmState alarm);
+
+private:
+
+    int runPin;
+    int faultPin;
+    int mutePin;
+
+    //
+    // LED verde
+    //
+
+    bool runState;
+    uint32_t runTimer;
+
+    //
+    // LED vermelho
+    //
+
+    bool faultState;
+    uint32_t faultTimer;
+
+    //
+    // LED amarelo
+    //
+
+    bool muteState;
+    uint32_t muteTimer;
+};
+```
+
+### 📄 types.h:
+
+```text
+#pragma once
+
+//
+// =====================================================
+// MÁQUINA DE ESTADOS PRINCIPAL
+// =====================================================
+//
+
+enum ControllerState
+{
+    IDLE,
+
+    STARTING,
+
+    RUNNING,
+
+    FINISHED,
+
+    RESETTING,
+
+    EMERGENCY
+};
+
+//
+// =====================================================
+// ESTADOS DE ALARME
+// =====================================================
+//
+
+enum AlarmState
+{
+    NO_ALARM,
+    ACTIVE_UNACKNOWLEDGED,
+    ACTIVE_ACKNOWLEDGED
+};
+
+//
+// =====================================================
+// FALHAS
+// =====================================================
+//
+
+enum FaultCode
+{
+    NO_FAULT = 0,
+    THERMOCOUPLE_OPEN,
+    TEMPERATURE_OUT_OF_RANGE,
+    SENSOR_STUCK,
+    HEATING_FAILURE,
+    OVERTEMPERATURE,
+    SSR_STUCK_ON
+};
+
+//
+// =====================================================
+// SNAPSHOT DE PROCESSO
+//
+// Estrutura usada para:
+//
+// - Serial
+// - Display
+// - WiFi
+// - Logging
+//
+// =====================================================
+//
+
+struct ProcessSnapshot
+{
+    ControllerState state;
+    FaultCode fault;
+    float setpoint;
+    float processValue;
+    float pidOutput;
+    bool ssrState;
+};
+```
+

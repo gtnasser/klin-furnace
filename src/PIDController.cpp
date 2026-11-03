@@ -5,13 +5,13 @@
 // Construtor
 // ------------------------------------------------------------
 PIDController::PIDController()
-    : _kp(0.0f),
-      _ki(0.0f),
-      _kd(0.0f),
-      _integral(0.0f),
-      _lastMeasurement(0.0f),
-      _lastOutput(0.0f),
-      _firstRun(true) {
+: _kp(0.0f),
+_ki(0.0f),
+_kd(0.0f),
+_integral(0.0f),
+_lastMeasurement(0.0f),
+_lastOutput(0.0f),
+_firstRun(true) {
 }
 
 // ------------------------------------------------------------
@@ -40,19 +40,19 @@ void PIDController::reset() {
 void PIDController::resetIntegral() {
     _integral = 0.0f;
 }
-
+    
 // ------------------------------------------------------------
 // Calculo do PID
 // ------------------------------------------------------------
-float PIDController::update(float setpoint, float measurement, float dtSim) {
-
+    float PIDController::update(float setpoint, float measurement, float dtSim) {
+        
     // dt invalido: retorna a ultima saida sem alterar estado
     if (dtSim <= 0.0f) {
         return _lastOutput;
     }
-
+    
     const float error = setpoint - measurement;
-
+    
     // --- Proporcional ---
     const float pTerm = _kp * error;
 
@@ -68,15 +68,15 @@ float PIDController::update(float setpoint, float measurement, float dtSim) {
         _lastMeasurement = measurement;
     }
 
-    // --- Integral com anti-windup condicional ---
+        // --- Integral com anti-windup condicional ---
     // Nao integra se a saida ja esta saturada na mesma direcao do erro.
     const bool saturatedHigh = (_lastOutput >= PID_OUTPUT_MAX);
     const bool saturatedLow  = (_lastOutput <= PID_OUTPUT_MIN);
-
+    
     const bool blockIntegral =
-        (saturatedHigh && error > 0.0f) ||
-        (saturatedLow  && error < 0.0f);
-
+    (saturatedHigh && error > 0.0f) ||
+    (saturatedLow  && error < 0.0f);
+    
     if (!blockIntegral) {
         _integral += _ki * error * dtSim;
         _integral = clamp(_integral, PID_INTEGRAL_MIN, PID_INTEGRAL_MAX);
@@ -85,7 +85,7 @@ float PIDController::update(float setpoint, float measurement, float dtSim) {
     // --- Saida ---
     const float output = pTerm + _integral + dTerm;
     _lastOutput = clamp(output, PID_OUTPUT_MIN, PID_OUTPUT_MAX);
-
+    
     return _lastOutput;
 }
 
