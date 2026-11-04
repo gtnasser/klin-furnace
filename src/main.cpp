@@ -1,4 +1,5 @@
 #include <Arduino.h>
+
 #include "Config.h"
 #include "Types.h"
 #include "KilnProfile.h"
@@ -17,7 +18,8 @@
 // Comandos seriais:
 //   S      - inicia o perfil ativo
 //   R      - solicita reset apos falha/fim
-//   T      - alterna entre PRODUCTION e TEST (apenas em IDLE)
+//   T      - lista os perfis disponiveis
+//   T<n>   - seleciona o perfil n (apenas em IDLE)
 //   I      - imprime o estado completo atual
 //   X<n>   - ajusta TIME_SCALE para n
 //   P<n>   - ajusta periodo de telemetria para n segundos simulados
@@ -29,7 +31,7 @@
 // ------------------------------------------------------------
 float     g_timeScale        = TIME_SCALE_DEFAULT;
 float     g_telemetryPeriodS = TELEMETRY_PERIOD_DEFAULT_S;
-ProfileId g_activeProfile    = PROFILE_DEFAULT;
+uint8_t   g_activeProfile    = PROFILE_DEFAULT;
 
 // ------------------------------------------------------------
 // Objetos globais
@@ -55,42 +57,43 @@ static HardwarePins PINS = {
 static uint32_t lastLoopMs = 0;
 
 // ------------------------------------------------------------
-// Selecao de perfil
+// Acesso a tabela de perfis
 // ------------------------------------------------------------
 static const float (*selectProfile())[2] {
-    return (g_activeProfile == PROFILE_TEST) ? TEST_POINTS
-                                             : PRODUCTION_POINTS;
+    return PROFILE_TABLE[g_activeProfile].points;
 }
 
 static uint8_t selectProfileLength() {
-    return (g_activeProfile == PROFILE_TEST) ? TEST_POINTS_LEN
-                                             : PRODUCTION_POINTS_LEN;
+    return PROFILE_TABLE[g_activeProfile].count;
 }
 
 static const char* profileName() {
-    return (g_activeProfile == PROFILE_TEST) ? "TEST" : "PRODUCTION";
+    return PROFILE_TABLE[g_activeProfile].name;
 }
 
 // ------------------------------------------------------------
 // Comandos seriais
 // ------------------------------------------------------------
 static void printHelp() {
-    Serial.println("{\"ev\":\"HELP\",\"cmds\":\"S=start R=reset T=toggle I=info X<n>=timeScale P<n>=telemPeriod ?=help\"}");
+    Serial.println("{\"ev\":\"HELP\",\"cmds\":\"S=start R=reset T=list T<n>=select I=info X<n>=timeScale P<n>=telemPeriod ?=help\"}");
 }
 
 static void cmdStart() {
     const ProfileStatus st = controller.start(selectProfile(),
                                               selectProfileLength());
+
     if (st == ProfileStatus::NOT_IDLE) {
         Serial.println("{\"ev\":\"START_DENIED\",\"reason\":\"NOT_IDLE\"}");
         return;
     }
+
     if (st != ProfileStatus::OK) {
         Serial.print("{\"ev\":\"PROFILE_INVALID\",\"reason\":\"");
         Serial.print(profileStatusToString(st));
         Serial.println("\"}");
         return;
     }
+
     Serial.print("{\"ev\":\"START\",\"profile\":\"");
     Serial.print(profileName());
     Serial.println("\"}");
@@ -101,6 +104,7 @@ static void cmdReset() {
         Serial.println("{\"ev\":\"RESET_OK\"}");
         return;
     }
+
     const KilnState s = controller.getState();
     if (s != KilnState::EMERGENCY && s != KilnState::FINISHED) {
         Serial.println("{\"ev\":\"RESET_DENIED\",\"reason\":\"NOT_ALLOWED_IN_STATE\"}");
@@ -109,18 +113,65 @@ static void cmdReset() {
     }
 }
 
-static void cmdToggleProfile() {
-    if (controller.getState() != KilnState::IDLE) {
-        Serial.println("{\"ev\":\"PROFILE_CHANGED_DENIED\",\"reason\":\"NOT_IDLE\"}");
+// ------------------------------------------------------------
+// T: lista os perfis da tabela
+// ------------------------------------------------------------
+static void cmdListProfiles() {
+    Serial.print("{\"ev\":\"PROFILE_LIST\",\"active\":");
+    Serial.print(g_activeProfile);
+    Serial.print(",\"profiles\":[");
+
+    for (uint8_t i = 0; i < PROFILE_COUNT; i++) {
+        if (i > 0) {
+            Serial.print(",");
+        }
+
+        const ProfileEntry& e = PROFILE_TABLE[i];
+
+        Serial.print("{\"i\":");
+        Serial.print(i);
+        Serial.print(",\"name\":\"");
+        Serial.print(e.name);
+        Serial.print("\",\"pts\":");
+        Serial.print(e.count);
+        Serial.print(",\"dur\":");
+        Serial.print(e.count > 0 ? e.points[e.count - 1][0] : 0.0f, 0);
+        Serial.print("}");
+    }
+
+    Serial.println("]}");
+}
+
+// ------------------------------------------------------------
+// T<n>: seleciona o perfil n
+// Ordem de validacao: indice -> estado -> slot vazio
+// ------------------------------------------------------------
+static void cmdSelectProfile(uint8_t index) {
+
+    if (index >= PROFILE_COUNT) {
+        Serial.println("{\"ev\":\"PROFILE_DENIED\",\"reason\":\"INVALID_INDEX\"}");
         return;
     }
 
-    g_activeProfile = (g_activeProfile == PROFILE_TEST)
-                      ? PROFILE_PRODUCTION
-                      : PROFILE_TEST;
+    if (controller.getState() != KilnState::IDLE) {
+        Serial.println("{\"ev\":\"PROFILE_DENIED\",\"reason\":\"NOT_IDLE\"}");
+        return;
+    }
 
-    Serial.print("{\"ev\":\"PROFILE_CHANGED\",\"profile\":\"");
-    Serial.print(profileName());
+    if (PROFILE_TABLE[index].count == 0 ||
+        PROFILE_TABLE[index].points == nullptr) {
+        Serial.print("{\"ev\":\"PROFILE_DENIED\",\"reason\":\"PROFILE_EMPTY\",\"index\":");
+        Serial.print(index);
+        Serial.println("}");
+        return;
+    }
+
+    g_activeProfile = index;
+
+    Serial.print("{\"ev\":\"PROFILE_CHANGED\",\"index\":");
+    Serial.print(index);
+    Serial.print(",\"name\":\"");
+    Serial.print(PROFILE_TABLE[index].name);
     Serial.println("\"}");
 }
 
@@ -143,7 +194,9 @@ static void cmdInfo() {
     Serial.print((int)controller.getSegment());
     Serial.print(",\"profile\":\"");
     Serial.print(profileName());
-    Serial.print("\",\"tscale\":");
+    Serial.print("\",\"pidx\":");
+    Serial.print(g_activeProfile);
+    Serial.print(",\"tscale\":");
     Serial.print(g_timeScale, 1);
     Serial.print(",\"tperiod\":");
     Serial.print(g_telemetryPeriodS, 1);
@@ -159,7 +212,9 @@ static void cmdSetTimeScale(float value) {
         Serial.println("}");
         return;
     }
+
     g_timeScale = value;
+
     Serial.print("{\"ev\":\"TIMESCALE_SET\",\"value\":");
     Serial.print(g_timeScale, 1);
     Serial.println("}");
@@ -174,7 +229,9 @@ static void cmdSetTelemetryPeriod(float value) {
         Serial.println("}");
         return;
     }
+
     g_telemetryPeriodS = value;
+
     Serial.print("{\"ev\":\"TELEMPERIOD_SET\",\"value\":");
     Serial.print(g_telemetryPeriodS, 1);
     Serial.println("}");
@@ -194,16 +251,20 @@ static bool readNumericArg(float& outValue) {
         const char c = (char)Serial.peek();
         if ((c >= '0' && c <= '9') || c == '.') {
             buf[len++] = (char)Serial.read();
-            if (c != '.') hasDigit = true;
+            if (c != '.') {
+                hasDigit = true;
+            }
         } else {
             break;
         }
     }
+
     buf[len] = '\0';
 
     if (!hasDigit) {
         return false;
     }
+
     outValue = atof(buf);
     return true;
 }
@@ -221,9 +282,15 @@ static void handleSerialCommands() {
                 cmdReset();
                 break;
 
-            case 'T': case 't':
-                cmdToggleProfile();
+            case 'T': case 't': {
+                float v = 0.0f;
+                if (readNumericArg(v)) {
+                    cmdSelectProfile((uint8_t)v);
+                } else {
+                    cmdListProfiles();
+                }
                 break;
+            }
 
             case 'I': case 'i':
                 cmdInfo();
@@ -291,6 +358,7 @@ void setup() {
     Serial.print(",\"telemPeriod\":");
     Serial.print(g_telemetryPeriodS, 1);
     Serial.println("}");
+
     printHelp();
 
     lastLoopMs = millis();
@@ -311,4 +379,3 @@ void loop() {
     handleSerialCommands();
     controller.update(dtMs);
 }
-
