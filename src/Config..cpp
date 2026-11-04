@@ -5,9 +5,29 @@
 // ============================================================
 
 // ------------------------------------------------------------
-// Perfil de producao: 435 min, aquecimento ate 900 degC
+// Perfil rapido: 5 min, aquecimento ate 100 degC
 // ------------------------------------------------------------
-const float PRODUCTION_POINTS[][2] = {
+const float FAST_BURN[][2] = {
+    {  0.0f,  25.0f },
+    {  2.0f,  60.0f },
+    {  4.0f, 100.0f },
+    {  5.0f, 100.0f }
+};
+
+static_assert(
+    (sizeof(FAST_BURN) / sizeof(FAST_BURN[0])) <= 255,
+    "FAST_BURN excede 255 pontos: count truncaria em uint8_t"
+);
+
+static_assert(
+    (sizeof(FAST_BURN) / sizeof(FAST_BURN[0])) <= 128,
+    "FAST_BURN excede 128 pontos: getSegmentIndex() (int8_t) transborda"
+);
+
+// ------------------------------------------------------------
+// Perfil regular: 435 min, aquecimento ate 900 degC
+// ------------------------------------------------------------
+const float REGULAR_BURN[][2] = {
     {   0.0f,   25.0f },
     {  60.0f,  200.0f },
     { 180.0f,  600.0f },
@@ -17,38 +37,31 @@ const float PRODUCTION_POINTS[][2] = {
 };
 
 static_assert(
-    (sizeof(PRODUCTION_POINTS) / sizeof(PRODUCTION_POINTS[0])) <= 255,
-    "PRODUCTION_POINTS excede 255 pontos: _LEN truncaria em uint8_t"
+    (sizeof(REGULAR_BURN) / sizeof(REGULAR_BURN[0])) <= 255,
+    "REGULAR_BURN excede 255 pontos: count truncaria em uint8_t"
 );
 
 static_assert(
-    (sizeof(PRODUCTION_POINTS) / sizeof(PRODUCTION_POINTS[0])) <= 128,
-    "PRODUCTION_POINTS excede 128 pontos: getSegmentIndex() (int8_t) transborda"
+    (sizeof(REGULAR_BURN) / sizeof(REGULAR_BURN[0])) <= 128,
+    "REGULAR_BURN excede 128 pontos: getSegmentIndex() (int8_t) transborda"
 );
 
-const uint8_t PRODUCTION_POINTS_LEN =
-    sizeof(PRODUCTION_POINTS) / sizeof(PRODUCTION_POINTS[0]);
-
 // ------------------------------------------------------------
-// Perfil de teste: 10 min, aquecimento ate 300 degC
+// Tabela de perfis
+// Slots vazios: points == nullptr, count == 0.
+// O nome do slot vazio e "VAZIO" para aparecer na listagem.
 // ------------------------------------------------------------
-const float TEST_POINTS[][2] = {
-    {  0.0f,  25.0f },
-    {  2.0f, 100.0f },
-    {  5.0f, 200.0f },
-    {  8.0f, 280.0f },
-    { 10.0f, 300.0f }
+const ProfileEntry PROFILE_TABLE[PROFILE_COUNT] = {
+    { "FAST_PROFILE",  FAST_BURN,
+      sizeof(FAST_BURN) / sizeof(FAST_BURN[0]) },
+    { "REGULAR_BURN",  REGULAR_BURN,
+      sizeof(REGULAR_BURN) / sizeof(REGULAR_BURN[0]) },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 },
+    { "VAZIO",         nullptr, 0 }
 };
-
-static_assert(
-    (sizeof(TEST_POINTS) / sizeof(TEST_POINTS[0])) <= 255,
-    "TEST_POINTS excede 255 pontos: _LEN truncaria em uint8_t"
-);
-
-static_assert(
-    (sizeof(TEST_POINTS) / sizeof(TEST_POINTS[0])) <= 128,
-    "TEST_POINTS excede 128 pontos: getSegmentIndex() (int8_t) transborda"
-);
-
-const uint8_t TEST_POINTS_LEN =
-    sizeof(TEST_POINTS) / sizeof(TEST_POINTS[0]);

@@ -9,7 +9,7 @@
 // Convencao:
 //   - #define para valores fixos (nao mudam em runtime)
 //   - extern para dados definidos em Config.cpp (arrays de perfil)
-//   - extern para as tres globais mutaveis (definidas no main.cpp)
+//   - extern para as globais mutaveis (definidas no main.cpp)
 //
 // Pinagem auditada contra restricoes do ESP32:
 //   - Nenhum pino de strapping (0, 2, 5, 12, 15) em uso
@@ -107,12 +107,12 @@
 // ------------------------------------------------------------
 #define SERIAL_BAUD_RATE       115200
 #define TELEMETRY_ENABLED      1
-#define TELEMETRY_PERIOD_DEFAULT_S  5.0f
+#define TELEMETRY_PERIOD_DEFAULT_S  3.0f
 
 // ------------------------------------------------------------
 // Escala de tempo
 // ------------------------------------------------------------
-#define TIME_SCALE_DEFAULT     50.0f
+#define TIME_SCALE_DEFAULT     1.0f
 
 // ------------------------------------------------------------
 // Limites dos comandos seriais (X<n> e P<n>)
@@ -123,32 +123,32 @@
 #define TELEMETRY_PERIOD_MAX   600.0f
 
 // ------------------------------------------------------------
-// Identificador do perfil ativo
+// Tabela de perfis de queima
+//
+// ProfileId deixa de ser enum: passa a ser indice uint8_t na
+// tabela ProfileEntry[]. Isso permite 10 perfis sem switch.
+// Slots vazios tem points == nullptr e count == 0.
 // ------------------------------------------------------------
-enum ProfileId : uint8_t {
-    PROFILE_PRODUCTION = 0,
-    PROFILE_TEST       = 1
+#define PROFILE_COUNT          10
+#define PROFILE_NONE           0xFF   // sentinela: nenhum perfil ativo
+
+struct ProfileEntry {
+    const char*        name;
+    const float (*points)[2];
+    uint8_t            count;
 };
 
-// ------------------------------------------------------------
-// Perfis de queima (definidos em Config.cpp)
-// ------------------------------------------------------------
-extern const float PRODUCTION_POINTS[][2];
-extern const uint8_t PRODUCTION_POINTS_LEN;
+// Tabela definida em Config.cpp
+extern const ProfileEntry PROFILE_TABLE[PROFILE_COUNT];
 
-extern const float TEST_POINTS[][2];
-extern const uint8_t TEST_POINTS_LEN;
-
-// ------------------------------------------------------------
-// Perfil ativo na inicializacao
-// ------------------------------------------------------------
-#define PROFILE_DEFAULT        PROFILE_TEST
+// Perfil ativo na inicializacao (0 = FAST_PROFILE)
+#define PROFILE_DEFAULT        0
 
 // ------------------------------------------------------------
 // Globais mutaveis em runtime (definidas no main.cpp)
 // ------------------------------------------------------------
 extern float     g_timeScale;
 extern float     g_telemetryPeriodS;
-extern ProfileId g_activeProfile;
+extern uint8_t   g_activeProfile;
 
 #endif // CONFIG_H
